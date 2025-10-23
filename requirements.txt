@@ -1,0 +1,13 @@
+torch>=2.2
+transformers>=4.44
+rdkit-pypi
+pandas
+numpy<2
+tqdm
+matplotlib
+genlm-control>=0.2.11
+sentencepiece
+accelerate
+bitsandbytes
+safetensors
+pyarrow

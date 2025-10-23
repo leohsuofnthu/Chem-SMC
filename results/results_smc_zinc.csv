@@ -1,0 +1,10 @@
+model,repo,method,n,validity,property_match,scaffold_diversity
+chemgpt-19m,ncfrey/ChemGPT-19M,smc_zinclike,5,1.0,0.0,0.2
+model,repo,method,n,validity,property_match,scaffold_diversity
+chemgpt-19m,ncfrey/ChemGPT-19M,smc_zinclike,5,1.0,0.0,0.2
+model,repo,method,n,validity,property_match,scaffold_diversity
+chemgpt-19m,ncfrey/ChemGPT-19M,smc_zinclike,50,1.0,0.0,0.02
+model,repo,method,n,validity,property_match,scaffold_diversity
+gpt2-zinc-87m,entropy/gpt2_zinc_87m,smc_zinclike,5,1.0,0.6,1.0
+model,repo,method,n,validity,property_match,scaffold_diversity
+gpt2-zinc-87m,entropy/gpt2_zinc_87m,smc_zinclike,5,1.0,0.4,1.0
