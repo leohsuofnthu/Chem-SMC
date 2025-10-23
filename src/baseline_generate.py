@@ -1,5 +1,5 @@
 """
-Baseline generation with ChemGPT (entropy/gpt2_zinc_87M).
+Baseline generation with GPT2-Zinc (entropy/gpt2_zinc_87M).
 """
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def generate_for_prompt(prompt_name: str, **kwargs) -> pd.DataFrame:
     spec = PROMPT_MAP[prompt_name]
     df = generate_baseline(spec.text, **kwargs)
     df = annotate_adherence(df, spec)
-    df = _attach_metadata(df, spec.name, "ChemGPT-87M")
+    df = _attach_metadata(df, spec.name, "GPT2-Zinc-87M")
     return df
 
 
@@ -128,7 +128,7 @@ def run_experiment(
             frames.append(frame)
             summary = summarise_adherence(frame)
             summary["Prompt"] = name
-            summary["Model"] = "ChemGPT-87M"
+            summary["Model"] = "GPT2-Zinc-87M"
             summary["Temperature"] = temp
             summaries.append(summary)
 
@@ -163,7 +163,7 @@ def run_experiment(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Baseline ChemGPT generation.")
+    parser = argparse.ArgumentParser(description="Baseline GPT2-Zinc generation.")
     parser.add_argument("--prompts", type=str, nargs="+", default=[p.name for p in PROMPTS])
     parser.add_argument("--n", type=int, default=1_000)
     parser.add_argument("--temperature", type=float, default=1.0)

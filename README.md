@@ -2,7 +2,7 @@
 
 Two complementary strategies for controlled molecule generation:
 
-1. **ChemGPT-87M + Sequential Monte Carlo (SMC)** via GenLM’s AWRS controller  
+1. **GPT2-Zinc-87M + Sequential Monte Carlo (SMC)** via GenLM’s AWRS controller  
 2. **SmileyLlama-8B** instruction following with prompt-based constraints
 
 Both approaches share the same prompt set and are evaluated on a ZINC-derived benchmark with identical metrics and visualisations.
@@ -24,7 +24,7 @@ jupyter lab  # open notebooks/run_experiment.ipynb
 The notebook executes the pipeline in order:
 
 1. `src.data_prep` – prepare reference/eval splits + percentile ranges  
-2. `src.baseline_generate` – ChemGPT baseline sampling (T = 1.0, 0.7)  
+2. `src.baseline_generate` – GPT2-Zinc baseline sampling (T = 1.0, 0.7)  
 3. `src.smc_generate` – GenLM SMC decoding with 10 particles  
 4. `src.smiley_generate` – SmileyLlama generation (bnb int4 by default)  
 5. `src.evaluate` – compute validity, distinctness, QED, diversity, KL, adherence  

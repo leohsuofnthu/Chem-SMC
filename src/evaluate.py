@@ -1,5 +1,5 @@
 """
-Evaluation utilities for ChemGPT+SMC vs SmileyLlama experiments.
+Evaluation utilities for GPT2-Zinc+SMC vs SmileyLlama experiments.
 """
 from __future__ import annotations
 

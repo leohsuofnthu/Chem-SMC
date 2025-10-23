@@ -181,7 +181,7 @@ def generate_for_prompt(
     collected = sampler.sample(spec, n=n)
     df = _samples_to_dataframe(collected)
     df = annotate_adherence(df, spec)
-    df["Model"] = "ChemGPT-87M+SMC"
+    df["Model"] = "GPT2-Zinc-87M+SMC"
     df["Prompt"] = spec.name
     df["Temperature"] = temperature
     df["TopP"] = top_p
@@ -239,7 +239,7 @@ def run_experiment(
             frames.append(df)
             summary = summarise_adherence(df)
             summary["Prompt"] = prompt_name
-            summary["Model"] = "ChemGPT-87M+SMC"
+            summary["Model"] = "GPT2-Zinc-87M+SMC"
             summary["Temperature"] = temp
             summaries.append(summary)
 

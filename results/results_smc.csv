@@ -1,9 +1,0 @@
-model,repo,method,n,validity,property_match,scaffold_diversity,time_s
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,2,1.0,0.0,0.5,51.11712408065796
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,10,1.0,0.0,0.1,47.5383939743042
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,5,1.0,0.0,0.2,46.80454754829407
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,5,1.0,0.0,0.2,21.03960084915161
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,5,1.0,0.0,0.2,13.117818832397461
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,5,1.0,0.0,0.2,71.5161509513855
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_10,5,1.0,0.0,0.2,46.6496365070343
-chemgpt-19m,ncfrey/ChemGPT-19M,smc_20,10,1.0,0.0,0.1,138.74871349334717

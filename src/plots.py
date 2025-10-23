@@ -1,5 +1,5 @@
 """
-Plotting utilities for ChemGPT+SMC vs SmileyLlama experiments.
+Plotting utilities for GPT2-Zinc+SMC vs SmileyLlama experiments.
 """
 from __future__ import annotations
 
@@ -117,8 +117,8 @@ def main() -> None:
     ref_valid = _valid(ref_df)
 
     model_frames = {
-        "ChemGPT baseline": _valid(baseline),
-        "ChemGPT+SMC": _valid(smc),
+        "GPT2-Zinc baseline": _valid(baseline),
+        "GPT2-Zinc+SMC": _valid(smc),
         "SmileyLlama": _valid(smiley),
     }
 
