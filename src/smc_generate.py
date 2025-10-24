@@ -26,6 +26,7 @@ import pandas as pd
 import torch
 from rdkit import Chem, RDLogger
 from transformers import set_seed
+from tqdm import tqdm
 
 # Silence RDKit warnings
 RDLogger.DisableLog("rdApp.*")
@@ -417,23 +418,51 @@ class GenLMSMCSampler:
         collected: Dict[str, float] = {}
         batches = 0
         target_batches = max_batches or max(4, math.ceil(n / max(self.particles, 1)))
-        while len(collected) < n and batches < target_batches:
-            posterior = asyncio.run(self._sample_once(prompt))
-            batches += 1
-            if not posterior:
-                continue
-            for sequence, weight in sorted(posterior.items(), key=lambda x: x[1], reverse=True):
-                if sequence.startswith(prompt.text):
-                    candidate = sequence[len(prompt.text) :].strip()
-                else:
-                    candidate = sequence.strip()
-                smiles = first_valid_smiles(candidate)
-                if not smiles:
+        
+        # Create progress bar for generation
+        pbar = tqdm(
+            total=n,
+            desc=f"Generating molecules ({prompt.name})",
+            unit="mol",
+            ncols=80,
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+        )
+        
+        try:
+            while len(collected) < n and batches < target_batches:
+                posterior = asyncio.run(self._sample_once(prompt))
+                batches += 1
+                
+                if not posterior:
+                    pbar.set_postfix({"Batch": f"{batches}/{target_batches}", "Valid": "0"})
                     continue
-                if smiles not in collected:
-                    collected[smiles] = weight
-                if len(collected) >= n:
-                    break
+                
+                valid_count = 0
+                for sequence, weight in sorted(posterior.items(), key=lambda x: x[1], reverse=True):
+                    if sequence.startswith(prompt.text):
+                        candidate = sequence[len(prompt.text) :].strip()
+                    else:
+                        candidate = sequence.strip()
+                    smiles = first_valid_smiles(candidate)
+                    if not smiles:
+                        continue
+                    if smiles not in collected:
+                        collected[smiles] = weight
+                        valid_count += 1
+                        pbar.update(1)
+                    if len(collected) >= n:
+                        break
+                
+                # Update progress bar with current status
+                pbar.set_postfix({
+                    "Batch": f"{batches}/{target_batches}",
+                    "Valid": f"{valid_count}",
+                    "Total": f"{len(collected)}/{n}"
+                })
+                
+        finally:
+            pbar.close()
+            
         return collected
 
 
@@ -526,25 +555,43 @@ def run_experiment(
     temperatures = list(temperatures or [1.0])
     frames: List[pd.DataFrame] = []
     summaries: List[pd.Series] = []
-    for prompt_name in prompt_names:
-        for temp in temperatures:
-            df = generate_for_prompt(
-                prompt_name,
-                n=n,
-                temperature=temp,
-                top_p=top_p,
-                particles=particles,
-                ess_threshold=ess_threshold,
-                max_new_tokens=max_new_tokens,
-                top_k=top_k,
-                seed=seed,
-            )
-            frames.append(df)
-            summary = summarise_adherence(df)
-            summary["Prompt"] = prompt_name
-            summary["Model"] = "GPT2-Zinc-87M+SMC"
-            summary["Temperature"] = temp
-            summaries.append(summary)
+    
+    # Create progress bar for experiment
+    total_experiments = len(prompt_names) * len(temperatures)
+    exp_pbar = tqdm(
+        total=total_experiments,
+        desc="Running SMC experiments",
+        unit="exp",
+        ncols=80,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+    )
+    
+    try:
+        for prompt_name in prompt_names:
+            for temp in temperatures:
+                exp_pbar.set_postfix({"Prompt": prompt_name, "Temp": f"{temp:.1f}"})
+                
+                df = generate_for_prompt(
+                    prompt_name,
+                    n=n,
+                    temperature=temp,
+                    top_p=top_p,
+                    particles=particles,
+                    ess_threshold=ess_threshold,
+                    max_new_tokens=max_new_tokens,
+                    top_k=top_k,
+                    seed=seed,
+                )
+                frames.append(df)
+                summary = summarise_adherence(df)
+                summary["Prompt"] = prompt_name
+                summary["Model"] = "GPT2-Zinc-87M+SMC"
+                summary["Temperature"] = temp
+                summaries.append(summary)
+                
+                exp_pbar.update(1)
+    finally:
+        exp_pbar.close()
 
     if not frames:
         raise RuntimeError("No SMC samples were generated.")
