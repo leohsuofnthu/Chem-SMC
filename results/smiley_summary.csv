@@ -1,0 +1,9 @@
+Valid %,Distinct %,Adherence %,QED,Prompt,Model,Temperature
+100.0,100.0,73.2,0.587026577004752,lipinski,SmileyLlama-8B,1.0
+100.0,100.0,74.5,0.6141812786386128,lipinski,SmileyLlama-8B,0.7
+100.0,100.0,10.2,0.5318400658382189,mw_logp_rotb,SmileyLlama-8B,1.0
+100.0,100.0,11.600000000000001,0.5437298195124833,mw_logp_rotb,SmileyLlama-8B,0.7
+100.0,100.0,37.4,0.5943270279914342,tpsa_fsp3,SmileyLlama-8B,1.0
+100.0,100.0,55.50000000000001,0.6173051438167,tpsa_fsp3,SmileyLlama-8B,0.7
+100.0,100.0,59.4,0.622279129395724,druglike_qed,SmileyLlama-8B,1.0
+100.0,100.0,65.9,0.6503542980392676,druglike_qed,SmileyLlama-8B,0.7

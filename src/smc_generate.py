@@ -83,12 +83,12 @@ class OptimizedMolecularConstraint:
         # Ultra-optimized scoring for maximum property matching to compete with SmileyLlama
         # MW scoring: Very sharp Gaussian centered at 350
         mw_center = 350
-        mw_penalty = abs(mw - mw_center) / 25  # Very tight tolerance
+        mw_penalty = abs(mw - mw_center) / 40  # wider tolerance
         mw_score = math.exp(-mw_penalty**2)
         
         # LogP scoring: Very sharp Gaussian centered at 2.0
         logp_center = 2.0
-        logp_penalty = abs(logp - logp_center) / 0.5  # Very tight tolerance
+        logp_penalty = abs(logp - logp_center) / 1.0
         logp_score = math.exp(-logp_penalty**2)
         
         # Rotatable bonds: Very strong penalty for high values
@@ -126,8 +126,8 @@ class OptimizedMolecularConstraint:
         final_score = base_score * ring_bonus * size_bonus * drug_bonus * lipinski_bonus
         
         # Maximum scaling for aggressive property matching
-        return float(max(final_score * 12.0, 0.001))
-
+        return float(max(final_score * 50.0, 0.001))
+        
 
 # ============================================================
 # Token decoding & SMILES sanitization (migrated from run_smc.py)
@@ -203,7 +203,7 @@ class MolecularPotential(Potential):
             if partial_smiles and _is_valid_partial_smiles(partial_smiles):
                 # Progressive reward based on partial SMILES quality
                 length_bonus = min(len(partial_smiles) / 20.0, 1.0)
-                return 0.1 + 0.1 * length_bonus
+                return 0.1 + 0.1 * length_bonus + random.uniform(0, 0.05)
             return 0.001
         
         # Encourage concise sequences
@@ -236,8 +236,8 @@ class SMILESConstraintPotential(Potential):
         import numpy as np
         decoded = context.decode("utf-8", errors="ignore")
 
-        # Allow empty start
-        if not decoded.strip():
+        # Encourage continuation even when not yet valid
+        if len(decoded) < 15:
             return 0.0
 
         smiles = first_valid_smiles(decoded)
@@ -438,7 +438,6 @@ class GenLMSMCSampler:
                     continue
                 
                 valid_count = 0
-                batch_molecules = []
                 for sequence, weight in sorted(posterior.items(), key=lambda x: x[1], reverse=True):
                     if sequence.startswith(prompt.text):
                         candidate = sequence[len(prompt.text) :].strip()
@@ -449,14 +448,10 @@ class GenLMSMCSampler:
                         continue
                     if smiles not in collected:
                         collected[smiles] = weight
-                        batch_molecules.append(smiles)
                         valid_count += 1
+                        pbar.update(1)
                     if len(collected) >= n:
                         break
-                
-                # Update progress bar with batch of molecules
-                if batch_molecules:
-                    pbar.update(len(batch_molecules))
                 
                 # Update progress bar with current status
                 pbar.set_postfix({
@@ -494,10 +489,10 @@ def _samples_to_dataframe(samples: Dict[str, float]) -> pd.DataFrame:
 def generate_for_prompt(
     prompt_name: str,
     n: int = 1_000,
-    temperature: float = 0.7,  # Updated default to match run_smc.py
+    temperature: float = 1.2,  # Updated default to match run_smc.py
     top_p: float = 0.9,
-    particles: int = 50,  # Updated default to match run_smc.py
-    ess_threshold: float = 0.3,  # Updated default to match run_smc.py
+    particles: int = 80,  # Updated default to match run_smc.py
+    ess_threshold: float = 0.25,  # Updated default to match run_smc.py
     max_new_tokens: int = 60,  # Updated default to match run_smc.py
     top_k: int = 30,  # Added top_k parameter
     seed: int = 0,
