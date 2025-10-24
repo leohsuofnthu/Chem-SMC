@@ -34,6 +34,8 @@ RDLogger.DisableLog("rdApp.*")
 from .utils import (
     PROMPTS,
     PROMPT_MAP,
+    GPT_ZINC_PROMPTS,
+    GPT_ZINC_PROMPT_MAP,
     PromptSpec,
     annotate_adherence,
     check_constraints,
@@ -498,7 +500,7 @@ def generate_for_prompt(
     seed: int = 0,
 ) -> pd.DataFrame:
     _seed_everything(seed)
-    spec = PROMPT_MAP[prompt_name]
+    spec = GPT_ZINC_PROMPT_MAP[prompt_name]
     sampler = GenLMSMCSampler(
         model_name=DEFAULT_MODEL_NAME,
         particles=particles,
@@ -607,7 +609,7 @@ def run_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="GenLM-based SMC generation.")
-    parser.add_argument("--prompts", nargs="+", default=[p.name for p in PROMPTS])
+    parser.add_argument("--prompts", nargs="+", default=[p.name for p in GPT_ZINC_PROMPTS])
     parser.add_argument("--n", type=int, default=1_000)
     parser.add_argument("--temperatures", type=float, nargs="+", default=[1.0])
     parser.add_argument("--top_p", type=float, default=0.9)

@@ -15,6 +15,8 @@ from tqdm import tqdm
 from .utils import (
     PROMPTS,
     PROMPT_MAP,
+    GPT_ZINC_PROMPTS,
+    GPT_ZINC_PROMPT_MAP,
     annotate_adherence,
     compute_properties_df,
     ensure_directory,
@@ -125,7 +127,7 @@ def _attach_metadata(df: pd.DataFrame, prompt_name: str, model_name: str) -> pd.
 
 
 def generate_for_prompt(prompt_name: str, **kwargs) -> pd.DataFrame:
-    spec = PROMPT_MAP[prompt_name]
+    spec = GPT_ZINC_PROMPT_MAP[prompt_name]
     df = generate_baseline(spec.text, **kwargs)
     df = annotate_adherence(df, spec)
     df = _attach_metadata(df, spec.name, "GPT2-Zinc-87M")
@@ -205,7 +207,7 @@ def run_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Baseline GPT2-Zinc generation.")
-    parser.add_argument("--prompts", type=str, nargs="+", default=[p.name for p in PROMPTS])
+    parser.add_argument("--prompts", type=str, nargs="+", default=[p.name for p in GPT_ZINC_PROMPTS])
     parser.add_argument("--n", type=int, default=1_000)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)

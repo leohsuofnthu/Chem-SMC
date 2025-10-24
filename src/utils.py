@@ -21,7 +21,8 @@ class PromptSpec:
     constraints: Dict[str, Tuple[Optional[float], Optional[float]]]
 
 
-PROMPTS: List[PromptSpec] = [
+# Instruction-style prompts for SMILEY (instruction-tuned model)
+SMILEY_PROMPTS: List[PromptSpec] = [
     PromptSpec(
         name="lipinski",
         text="Generate molecules satisfying Lipinski's rule of 5 (HBD <= 5, HBA <= 10, MW <= 500, logP <= 5).",
@@ -59,7 +60,92 @@ PROMPTS: List[PromptSpec] = [
     ),
 ]
 
-PROMPT_MAP = {p.name: p for p in PROMPTS}
+# Strategic prefix-style prompts for GPT-Zinc (base model trained on SMILES)
+# Each prompt is designed to bias toward specific molecular features and properties
+GPT_ZINC_PROMPTS: List[PromptSpec] = [
+    PromptSpec(
+        name="aromatic_core",
+        text="C1=CC=",  # Encourages ring closure & aromatic substituents
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="amino_aliphatic",
+        text="CCN",  # Introduces N heteroatom early for secondary/tertiary amines
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="polar_ether",
+        text="COC",  # Increases oxygen / hydrogen bonding for ethers and alcohols
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="carbonyl_anchor",
+        text="CC(=O)",  # Helps model build amides, esters
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="heterocycle_friendly",
+        text="C1CN",  # Ring templates for morpholine, piperazine
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="sulfur_phosphorus",
+        text="CCS",  # Rare atom exposure for thioethers, sulfoxides
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="extended_polar",
+        text="CCOCCN",  # Pushes toward drug-like logP ~2-4
+        constraints={
+            "MW": (200, 500),
+            "logP": (2, 4),  # Specific logP range for drug-likeness
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="fallback_generic",
+        text="CCC",  # Stable control condition for baseline aliphatic generation
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+]
+
+# Default to SMILEY prompts for backward compatibility
+PROMPTS: List[PromptSpec] = SMILEY_PROMPTS
+
+# Create prompt maps for both model types
+SMILEY_PROMPT_MAP = {p.name: p for p in SMILEY_PROMPTS}
+GPT_ZINC_PROMPT_MAP = {p.name: p for p in GPT_ZINC_PROMPTS}
+
+# Default prompt map (for backward compatibility)
+PROMPT_MAP = SMILEY_PROMPT_MAP
 
 PROPERTY_FNS = {
     "MW": Descriptors.MolWt,
