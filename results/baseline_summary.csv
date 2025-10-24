@@ -1,0 +1,5 @@
+Valid %,Distinct %,Adherence %,QED,Prompt,Model,Temperature
+21.7,3.4,20.3,0.34348823344098955,lipinski,GPT2-Zinc-87M,1.0
+32.1,3.5,0.0,0.352170894947622,mw_logp_rotb,GPT2-Zinc-87M,1.0
+25.3,2.3,4.1000000000000005,0.3477396253692521,tpsa_fsp3,GPT2-Zinc-87M,1.0
+25.8,3.3,0.0,0.3519595583565575,druglike_qed,GPT2-Zinc-87M,1.0

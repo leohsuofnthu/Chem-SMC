@@ -3,6 +3,7 @@ Sequential Monte Carlo generation using GenLM's AWRS controller.
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import math
 import random
@@ -48,29 +49,60 @@ def _seed_everything(seed: int) -> None:
 
 
 def _make_potential(prompt: PromptSpec):
-    """Create GenLM potential combining validity and property adherence."""
+    """Create GenLM potential with optimized ZINC-like reward function."""
 
     def potential(seq: bytes) -> float:
         decoded = seq.decode("utf-8", errors="ignore")
         smiles = first_valid_smiles(decoded)
         if not smiles:
-            return -5.0
+            return 0.001
 
         # Encourage concise sequences that primarily contain SMILES.
         if len(decoded.strip()) > len(smiles) + 20:
-            return -1.0
+            return 0.001
 
         props = compute_properties(smiles)
         if props is None:
-            return -4.0
+            return 0.001
 
-        reward = props.get("QED", 0.0)  # Baseline quality term
-        if check_constraints(props, prompt.constraints):
-            reward += 2.0  # property adherence bonus
+        mw = props.get("MW", 0)
+        logp = props.get("logP", 0)
+        rotb = props.get("RotB", 0)
 
-        heavy_atoms = Chem.MolFromSmiles(smiles).GetNumHeavyAtoms()
-        reward += min(heavy_atoms / 50.0, 0.5)  # light size prior
-        return float(reward)
+        # Hard cutoff for completely invalid molecules
+        if mw > 600 or logp > 6 or rotb > 15:
+            return 0.001
+
+        # Optimized ZINC-like scoring (same as our previous implementation)
+        import math
+        
+        # MW scoring: Gaussian-like with steeper falloff
+        mw_center = 350  # Target center
+        mw_penalty = abs(mw - mw_center) / 50  # Normalized distance
+        mw_score = math.exp(-mw_penalty**2)  # Gaussian-like
+        
+        # LogP scoring: More sensitive to deviations
+        logp_center = 2.0  # Target center
+        logp_penalty = abs(logp - logp_center) / 1.0  # Normalized distance
+        logp_score = math.exp(-logp_penalty**2)  # Gaussian-like
+        
+        # Rotatable bonds: Exponential penalty for high values
+        rotb_score = math.exp(-max(0, rotb - 5) / 2.0)  # Penalty starts at 5 rotb
+        
+        # Ring bonus: Encourage ring structures (drug-like)
+        mol = Chem.MolFromSmiles(smiles)
+        rings = Chem.rdMolDescriptors.CalcNumRings(mol)
+        ring_bonus = 1.0 + 0.2 * min(rings, 4)  # Reduced bonus to avoid over-weighting
+        
+        # Size bonus: Penalize very small molecules
+        size_bonus = 1.0 + 0.1 * min(mw / 100, 3)  # Bonus for larger molecules
+        
+        # Combine scores with weights
+        base_score = mw_score * logp_score * rotb_score
+        final_score = base_score * ring_bonus * size_bonus
+        
+        # Scale to reasonable range
+        return float(max(final_score * 5.0, 0.001))
 
     return potential
 
