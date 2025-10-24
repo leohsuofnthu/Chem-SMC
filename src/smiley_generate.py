@@ -113,15 +113,15 @@ def _gather_smiles(
                 eos_token_id=tokenizer.eos_token_id,
             )
         decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-            for text in decoded:
-                body = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
-                smiles_list = all_valid_smiles(body)
-                for smi in smiles_list:
-                    if smi not in seen:
-                        seen.add(smi)
-                        collected.append(smi)
-                        if len(collected) >= target_n:
-                            break
+        for text in decoded:
+            body = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
+            smiles_list = all_valid_smiles(body)
+            for smi in smiles_list:
+                if smi not in seen:
+                    seen.add(smi)
+                    collected.append(smi)
+                    if len(collected) >= target_n:
+                        break
             if len(collected) >= target_n:
                 break
         pbar.update(1)
