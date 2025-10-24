@@ -1,6 +1,6 @@
 torch>=2.2
 transformers>=4.44
-rdkit-pypi
+rdkit
 pandas
 numpy<2
 tqdm
