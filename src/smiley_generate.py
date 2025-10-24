@@ -98,34 +98,64 @@ def _gather_smiles(
     device = next(model.parameters()).device
     collected: List[str] = []
     seen = set()
-    pbar = tqdm(desc="Smiley batches", unit="batch")
-    while len(collected) < target_n:
-        prompts = [prompt] * batch_size
-        inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                do_sample=True,
-                temperature=temperature,
-                top_p=top_p,
-                max_new_tokens=max_new_tokens,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-        decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        for text in decoded:
-            body = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
-            smiles_list = all_valid_smiles(body)
-            for smi in smiles_list:
-                if smi not in seen:
-                    seen.add(smi)
-                    collected.append(smi)
-                    if len(collected) >= target_n:
-                        break
-            if len(collected) >= target_n:
-                break
-        pbar.update(1)
-    pbar.close()
+    
+    # Create progress bar for Smiley generation
+    pbar = tqdm(
+        total=target_n,
+        desc="Generating SmileyLlama molecules",
+        unit="mol",
+        ncols=80,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+    )
+    
+    batch_count = 0
+    try:
+        while len(collected) < target_n:
+            batch_count += 1
+            prompts = [prompt] * batch_size
+            inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    do_sample=True,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_new_tokens=max_new_tokens,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+            decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+            
+            valid_count = 0
+            batch_molecules = []
+            for text in decoded:
+                body = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
+                smiles_list = all_valid_smiles(body)
+                for smi in smiles_list:
+                    if smi not in seen:
+                        seen.add(smi)
+                        collected.append(smi)
+                        batch_molecules.append(smi)
+                        valid_count += 1
+                        if len(collected) >= target_n:
+                            break
+                if len(collected) >= target_n:
+                    break
+            
+            # Update progress bar with batch of molecules
+            if batch_molecules:
+                pbar.update(len(batch_molecules))
+            
+            # Update progress bar with current status
+            pbar.set_postfix({
+                "Batch": f"{batch_count}",
+                "Valid": f"{valid_count}",
+                "Temp": f"{temperature:.1f}",
+                "Total": f"{len(collected)}/{target_n}"
+            })
+    finally:
+        pbar.close()
+    
     return collected[:target_n]
 
 
@@ -186,25 +216,43 @@ def run_experiment(
     frames: List[pd.DataFrame] = []
     summaries: List[pd.Series] = []
     temp_list = list(temperatures or [1.0])
-    for idx, prompt_name in enumerate(prompt_names):
-        for temp in temp_list:
-            df = generate_for_prompt(
-                tokenizer,
-                model,
-                prompt_name,
-                n=n,
-                temperature=temp,
-                top_p=top_p,
-                max_new_tokens=max_new_tokens,
-                batch_size=batch_size,
-                seed=seed + idx,
-            )
-            frames.append(df)
-            summary = summarise_adherence(df)
-            summary["Prompt"] = prompt_name
-            summary["Model"] = "SmileyLlama-8B"
-            summary["Temperature"] = temp
-            summaries.append(summary)
+    
+    # Create progress bar for experiment
+    total_experiments = len(prompt_names) * len(temp_list)
+    exp_pbar = tqdm(
+        total=total_experiments,
+        desc="Running SmileyLlama experiments",
+        unit="exp",
+        ncols=80,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+    )
+    
+    try:
+        for idx, prompt_name in enumerate(prompt_names):
+            for temp in temp_list:
+                exp_pbar.set_postfix({"Prompt": prompt_name, "Temp": f"{temp:.1f}"})
+                
+                df = generate_for_prompt(
+                    tokenizer,
+                    model,
+                    prompt_name,
+                    n=n,
+                    temperature=temp,
+                    top_p=top_p,
+                    max_new_tokens=max_new_tokens,
+                    batch_size=batch_size,
+                    seed=seed + idx,
+                )
+                frames.append(df)
+                summary = summarise_adherence(df)
+                summary["Prompt"] = prompt_name
+                summary["Model"] = "SmileyLlama-8B"
+                summary["Temperature"] = temp
+                summaries.append(summary)
+                
+                exp_pbar.update(1)
+    finally:
+        exp_pbar.close()
 
     results = pd.concat(frames, ignore_index=True)
     ensure_directory(Path(out_csv).parent.as_posix())

@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+from tqdm import tqdm
 
 from .utils import (
     PROMPTS,
@@ -71,22 +72,43 @@ def generate_baseline(
     device = next(model.parameters()).device
 
     outputs: List[str] = []
-    while len(outputs) < n:
-        current_batch = min(batch_size, n - len(outputs))
-        prompts = [prompt] * current_batch
-        encoded = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
-        with torch.no_grad():
-            generated = model.generate(
-                **encoded,
-                max_new_tokens=max_new_tokens,
-                temperature=T,
-                top_p=top_p,
-                do_sample=True,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-        decoded = _decode_generations(tokenizer, prompts, generated)
-        outputs.extend(decoded)
+    
+    # Create progress bar for baseline generation
+    pbar = tqdm(
+        total=n,
+        desc="Generating baseline molecules",
+        unit="mol",
+        ncols=80,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+    )
+    
+    try:
+        while len(outputs) < n:
+            current_batch = min(batch_size, n - len(outputs))
+            prompts = [prompt] * current_batch
+            encoded = tokenizer(prompts, return_tensors="pt", padding=True).to(device)
+            with torch.no_grad():
+                generated = model.generate(
+                    **encoded,
+                    max_new_tokens=max_new_tokens,
+                    temperature=T,
+                    top_p=top_p,
+                    do_sample=True,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+            decoded = _decode_generations(tokenizer, prompts, generated)
+            outputs.extend(decoded)
+            
+            # Update progress bar with batch of molecules
+            pbar.update(len(decoded))
+            pbar.set_postfix({
+                "Batch": f"{len(outputs)}/{n}",
+                "Temp": f"{T:.1f}",
+                "TopP": f"{top_p:.1f}"
+            })
+    finally:
+        pbar.close()
 
     df = compute_properties_df(outputs[:n])
     df["Temperature"] = T
@@ -121,16 +143,35 @@ def run_experiment(
     summaries = []
     default_temp = gen_kwargs.pop("T", 1.0)
     base_kwargs = gen_kwargs
-    for name in prompt_names:
-        temps = list(temperatures or [default_temp])
-        for temp in temps:
-            frame = generate_for_prompt(name, T=temp, **base_kwargs)
-            frames.append(frame)
-            summary = summarise_adherence(frame)
-            summary["Prompt"] = name
-            summary["Model"] = "GPT2-Zinc-87M"
-            summary["Temperature"] = temp
-            summaries.append(summary)
+    
+    # Create progress bar for experiment
+    temp_list = list(temperatures or [default_temp])
+    total_experiments = len(prompt_names) * len(temp_list)
+    exp_pbar = tqdm(
+        total=total_experiments,
+        desc="Running baseline experiments",
+        unit="exp",
+        ncols=80,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+    )
+    
+    try:
+        for name in prompt_names:
+            temps = list(temperatures or [default_temp])
+            for temp in temps:
+                exp_pbar.set_postfix({"Prompt": name, "Temp": f"{temp:.1f}"})
+                
+                frame = generate_for_prompt(name, T=temp, **base_kwargs)
+                frames.append(frame)
+                summary = summarise_adherence(frame)
+                summary["Prompt"] = name
+                summary["Model"] = "GPT2-Zinc-87M"
+                summary["Temperature"] = temp
+                summaries.append(summary)
+                
+                exp_pbar.update(1)
+    finally:
+        exp_pbar.close()
 
     results = pd.concat(frames, ignore_index=True)
     columns = [

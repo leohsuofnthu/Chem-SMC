@@ -372,7 +372,7 @@ class GenLMSMCSampler:
         # 2️⃣  Coerce the constraint potential to work with the LLM's token type
         try:
             coerced_constraint = constraint_potential.coerce(self.llm, f=b"".join)
-            print("✅ SMILES constraint potential coerced to LLM token type")
+            # print("✅ SMILES constraint potential coerced to LLM token type")
         except Exception as e:
             print(f"⚠️ Constraint coercion failed ({e}); using direct constraint.")
             coerced_constraint = constraint_potential
@@ -381,7 +381,7 @@ class GenLMSMCSampler:
         scoring_potential = _make_potential(prompt)
         try:
             coerced_scoring = scoring_potential.coerce(self.llm, f=b"".join)
-            print("✅ Scoring potential coerced to LLM token type")
+            # print("✅ Scoring potential coerced to LLM token type")
         except Exception as e:
             print(f"⚠️ Scoring coercion failed ({e}); using direct scoring.")
             coerced_scoring = scoring_potential
@@ -389,7 +389,7 @@ class GenLMSMCSampler:
         # 4️⃣  Create AWRS sampler with boolean constraint
         try:
             sampler = AWRS(self.llm, coerced_constraint)
-            print("✅ Using AWRS with SMILES boolean constraint")
+            # print("✅ Using AWRS with SMILES boolean constraint")
         except Exception as e:
             print(f"⚠️ AWRS constraint failed ({e}); falling back to direct sampling.")
             from genlm.control import direct_token_sampler
@@ -422,7 +422,7 @@ class GenLMSMCSampler:
         # Create progress bar for generation
         pbar = tqdm(
             total=n,
-            desc=f"Generating molecules ({prompt.name})",
+            desc="Generating SMC molecules",
             unit="mol",
             ncols=80,
             bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
@@ -438,6 +438,7 @@ class GenLMSMCSampler:
                     continue
                 
                 valid_count = 0
+                batch_molecules = []
                 for sequence, weight in sorted(posterior.items(), key=lambda x: x[1], reverse=True):
                     if sequence.startswith(prompt.text):
                         candidate = sequence[len(prompt.text) :].strip()
@@ -448,10 +449,14 @@ class GenLMSMCSampler:
                         continue
                     if smiles not in collected:
                         collected[smiles] = weight
+                        batch_molecules.append(smiles)
                         valid_count += 1
-                        pbar.update(1)
                     if len(collected) >= n:
                         break
+                
+                # Update progress bar with batch of molecules
+                if batch_molecules:
+                    pbar.update(len(batch_molecules))
                 
                 # Update progress bar with current status
                 pbar.set_postfix({
