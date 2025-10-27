@@ -35,12 +35,24 @@ def _load_model(device: str = "cpu") -> Tuple[AutoTokenizer, AutoModelForCausalL
         return _MODEL_CACHE[key]
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+    # ---- Robust handling of missing special tokens ----
+    if tokenizer.eos_token is None:
+        tokenizer.add_special_tokens({'eos_token': ''})  # add an end token if none exists
+        tokenizer.eos_token = ''
+
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        tokenizer.pad_token = '[PAD]'
+        tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids('[PAD]')
+
+    # ----------------------------------------------------
 
     model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype=torch_dtype)
+    model.resize_token_embeddings(len(tokenizer))
     model.to(device)
     model.eval()
+
     _MODEL_CACHE[key] = (tokenizer, model)
     return tokenizer, model
 
