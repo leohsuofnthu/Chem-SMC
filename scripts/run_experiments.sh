@@ -36,7 +36,17 @@ python -m src.smiley_generate \
   --out_csv results/smiley_results.csv \
   --summary_csv results/smiley_summary.csv
 
-echo "[4/4] Running GenLM SMC generation with strategic prompts..."
+echo "[4/5] Running ChemGPT-4.7M generation with strategic prompts..."
+python -m src.chemgpt_generate \
+  --prompts ${GPT_ZINC_PROMPTS[@]} \
+  --n 1000 \
+  --temperature 1.0 \
+  --top_p 0.9 \
+  --batch_size 128 \
+  --out_csv results/chemgpt_results.csv \
+  --summary_csv results/chemgpt_summary.csv
+
+echo "[5/5] Running GenLM SMC generation with strategic prompts..."
 python -m src.smc_generate \
   --prompts ${GPT_ZINC_PROMPTS[@]} \
   --n 100 \
