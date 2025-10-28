@@ -17,8 +17,11 @@ from .utils import (
     PROMPT_MAP,
     GPT_ZINC_PROMPTS,
     GPT_ZINC_PROMPT_MAP,
+    CHEMGPT_PROMPTS,
+    CHEMGPT_PROMPT_MAP,
     annotate_adherence,
     compute_properties_df,
+    decode_chemgpt_generation,
     ensure_directory,
     summarise_adherence,
 )
@@ -67,7 +70,14 @@ def _decode_generations(
     for text, prompt in zip(decoded, prompt_texts):
         if text.startswith(prompt):
             text = text[len(prompt) :]
-        cleaned.append(text.strip())
+        
+        # Convert SELFIES tokens to SMILES
+        smiles = decode_chemgpt_generation(text.strip())
+        if smiles:
+            cleaned.append(smiles)
+        else:
+            # If conversion fails, keep the original text for debugging
+            cleaned.append(text.strip())
     return cleaned
 
 
@@ -139,7 +149,7 @@ def _attach_metadata(df: pd.DataFrame, prompt_name: str, model_name: str) -> pd.
 
 
 def generate_for_prompt(prompt_name: str, **kwargs) -> pd.DataFrame:
-    spec = GPT_ZINC_PROMPT_MAP[prompt_name]
+    spec = CHEMGPT_PROMPT_MAP[prompt_name]
     df = generate_chemgpt(spec.text, **kwargs)
     df = annotate_adherence(df, spec)
     df = _attach_metadata(df, spec.name, "ChemGPT-4.7M")
@@ -219,7 +229,7 @@ def run_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="ChemGPT-4.7M generation.")
-    parser.add_argument("--prompts", type=str, nargs="+", default=[p.name for p in GPT_ZINC_PROMPTS])
+    parser.add_argument("--prompts", type=str, nargs="+", default=[p.name for p in CHEMGPT_PROMPTS])
     parser.add_argument("--n", type=int, default=1_000)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)

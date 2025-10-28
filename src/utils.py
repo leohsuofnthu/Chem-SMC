@@ -1,5 +1,9 @@
 """
 Shared utility functions for molecule generation experiments.
+
+Note: ChemGPT was trained with SELFIES library version 1.0.4.
+All SELFIES conversions use sf.decoder() and sf.encoder() functions
+from SELFIES 1.0.4 for compatibility.
 """
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
 import re
+import selfies as sf
 
 
 @dataclass(frozen=True)
@@ -140,9 +145,86 @@ GPT_ZINC_PROMPTS: List[PromptSpec] = [
 # Default to SMILEY prompts for backward compatibility
 PROMPTS: List[PromptSpec] = SMILEY_PROMPTS
 
+# SELFIES-based prefix prompts for ChemGPT-4.7M (uses SELFIES tokenization)
+CHEMGPT_PROMPTS: List[PromptSpec] = [
+    PromptSpec(
+        name="aromatic_core",
+        text="[C][=C][C][=C]",  # SELFIES equivalent of "C1=CC=" - encourages aromatic rings
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="amino_aliphatic", 
+        text="[C][C][N]",  # SELFIES equivalent of "CCN" - introduces nitrogen for amines
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="polar_ether",
+        text="[C][O][C]",  # SELFIES equivalent of "COC" - ether/alcohol functionality
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="carbonyl_anchor",
+        text="[C][C][=O]",  # SELFIES equivalent of "CC(=O)" - carbonyl groups
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="heterocycle_friendly",
+        text="[C][C][N][C]",  # SELFIES equivalent of "C1CN" - heterocycle templates
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="sulfur_phosphorus",
+        text="[C][C][S]",  # SELFIES equivalent of "CCS" - sulfur-containing groups
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="extended_polar",
+        text="[C][C][O][C][C][N]",  # SELFIES equivalent of "CCOCCN" - extended polar chains
+        constraints={
+            "MW": (200, 500),
+            "logP": (2, 4),  # Specific logP range for drug-likeness
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="fallback_generic",
+        text="[C][C][C]",  # SELFIES equivalent of "CCC" - simple aliphatic baseline
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+]
+
 # Create prompt maps for both model types
 SMILEY_PROMPT_MAP = {p.name: p for p in SMILEY_PROMPTS}
 GPT_ZINC_PROMPT_MAP = {p.name: p for p in GPT_ZINC_PROMPTS}
+CHEMGPT_PROMPT_MAP = {p.name: p for p in CHEMGPT_PROMPTS}
 
 # Default prompt map (for backward compatibility)
 PROMPT_MAP = SMILEY_PROMPT_MAP
@@ -285,3 +367,94 @@ def all_valid_smiles(text: str) -> List[str]:
         if canonical and canonical not in hits:
             hits.append(canonical)
     return hits
+
+
+def smiles_to_selfies(smiles: str) -> Optional[str]:
+    """
+    Convert SMILES string to SELFIES string using SELFIES 1.0.4.
+    
+    Args:
+        smiles: SMILES string to convert
+        
+    Returns:
+        SELFIES string or None if conversion fails
+    """
+    try:
+        if not is_valid_smiles(smiles):
+            return None
+        # SELFIES 1.0.4 uses sf.encoder()
+        return sf.encoder(smiles)
+    except Exception:
+        return None
+
+
+def convert_selfies_to_smiles(selfies_text: str) -> Optional[str]:
+    """
+    Convert SELFIES text to valid SMILES string using SELFIES 1.0.4.
+    
+    Args:
+        selfies_text: Raw text containing SELFIES tokens
+        
+    Returns:
+        Valid SMILES string or None if conversion fails
+    """
+    try:
+        # First, clean up the text to extract SELFIES tokens
+        cleaned_text = selfies_text.strip()
+        
+        # Remove any non-SELFIES characters and normalize
+        # SELFIES tokens are enclosed in square brackets
+        import re
+        selfies_pattern = r'\[[^\]]+\]'
+        selfies_tokens = re.findall(selfies_pattern, cleaned_text)
+        
+        if not selfies_tokens:
+            return None
+            
+        # Join the SELFIES tokens into a proper SELFIES string
+        selfies_string = ''.join(selfies_tokens)
+        
+        # Convert SELFIES to SMILES using SELFIES 1.0.4 decoder
+        smiles = sf.decoder(selfies_string)
+        
+        # Validate the resulting SMILES
+        if smiles and is_valid_smiles(smiles):
+            return canonicalize_smiles(smiles)
+        
+        return None
+        
+    except Exception:
+        return None
+
+
+def decode_chemgpt_generation(text: str) -> Optional[str]:
+    """
+    Decode ChemGPT generation output to valid SMILES.
+    
+    This function handles the specific tokenization used by ChemGPT-4.7M
+    which generates SELFIES tokens that need to be converted to SMILES.
+    
+    Args:
+        text: Raw generated text from ChemGPT
+        
+    Returns:
+        Valid SMILES string or None if conversion fails
+    """
+    try:
+        # First try direct SELFIES conversion
+        smiles = convert_selfies_to_smiles(text)
+        if smiles:
+            return smiles
+            
+        # Fallback: try to extract and clean any SMILES-like patterns
+        # This handles cases where the model generates mixed content
+        candidates = iter_candidate_smiles(text)
+        for candidate in candidates:
+            canonical = canonicalize_smiles(candidate)
+            if canonical:
+                return canonical
+                
+        return None
+        
+    except Exception:
+        return None

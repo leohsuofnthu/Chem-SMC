@@ -11,3 +11,4 @@ accelerate
 bitsandbytes
 safetensors
 pyarrow
+selfies==1.0.4
