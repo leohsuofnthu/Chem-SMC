@@ -423,7 +423,8 @@ def convert_selfies_to_smiles(selfies_text: str) -> Optional[str]:
         
         return None
         
-    except Exception:
+    except Exception as e:
+        print(f"SELFIES conversion error: {e}")
         return None
 
 
@@ -456,5 +457,6 @@ def decode_chemgpt_generation(text: str) -> Optional[str]:
                 
         return None
         
-    except Exception:
+    except Exception as e:
+        print(f"ChemGPT decoder error: {e}")
         return None
