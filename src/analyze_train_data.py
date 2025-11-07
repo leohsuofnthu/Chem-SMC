@@ -75,6 +75,10 @@ def compute_properties_df_with_progress(smiles_list: list[str], desc: str = "Com
     """Compute properties with progress bar."""
     from rdkit import Chem
     from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
+    from rdkit import RDLogger
+    
+    # Suppress RDKit SMILES parse error messages
+    RDLogger.DisableLog("rdApp.*")
     
     PROPERTY_FNS = {
         "MW": Descriptors.MolWt,

@@ -3,16 +3,21 @@ Shared utility functions for molecule generation experiments.
 """
 from __future__ import annotations
 
+import json
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-import json
 
 import numpy as np
 import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
-import re
+from rdkit import RDLogger
+
+# Suppress RDKit SMILES parse error messages
+RDLogger.DisableLog("rdApp.*")
 
 
 @dataclass(frozen=True)

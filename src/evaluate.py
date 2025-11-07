@@ -12,6 +12,10 @@ import numpy as np
 import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
+from rdkit import RDLogger
+
+# Suppress RDKit SMILES parse error messages
+RDLogger.DisableLog("rdApp.*")
 
 
 def _load_results(path: str) -> pd.DataFrame:
