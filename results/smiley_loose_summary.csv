@@ -1,2 +1,2 @@
 Valid %,Distinct %,Adherence %,QED,ConstraintLevel,Model,Prompt,Temperature,Runtime_seconds,Runtime_minutes,Runtime_formatted
-100.0,100.0,16.900000000000002,0.57394994539456,loose,SmileyLlama-8B,mw_logp_rotb,1.0,225.19286155700684,3.7532143592834473,3m 45s
+100.0,100.0,16.900000000000002,0.57394994539456,loose,SmileyLlama-8B,mw_logp_rotb,1.0,228.89092874526978,3.814848812421163,3m 48s
