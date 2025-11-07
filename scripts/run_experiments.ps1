@@ -8,6 +8,9 @@ $PropertyRanges = "data/train_property_ranges.json"
 $Dataset = "Combined"
 $N = 1000
 
+# Record overall start time
+$ScriptStartTime = Get-Date
+
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Simplified Constraint-Based Experiments" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
@@ -66,15 +69,50 @@ foreach ($level in $ConstraintLevels) {
 Write-Host "  - Combining SmileyLlama results..." -ForegroundColor Yellow
 python -c "import pandas as pd; import glob; files = sorted(glob.glob('results/smiley_*_results.csv')); dfs = [pd.read_csv(f) for f in files] if files else []; pd.concat(dfs, ignore_index=True).to_csv('results/smiley_results.csv', index=False) if dfs else None; print(f'  Combined {len(files)} files into smiley_results.csv') if files else print('  No files to combine')"
 
+# Calculate total runtime
+$ScriptEndTime = Get-Date
+$ScriptRuntime = $ScriptEndTime - $ScriptStartTime
+$ScriptRuntimeMin = [math]::Floor($ScriptRuntime.TotalMinutes)
+$ScriptRuntimeSec = $ScriptRuntime.Seconds
+
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Experiments completed!" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host ""
+Write-Host "Total runtime: ${ScriptRuntimeMin}m ${ScriptRuntimeSec}s" -ForegroundColor White
+Write-Host ""
 Write-Host "Results saved to:" -ForegroundColor White
 Write-Host "  - results/baseline_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
 Write-Host "  - results/smiley_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
 Write-Host "  - Individual files: results/baseline_*_results.csv, results/smiley_*_results.csv" -ForegroundColor Gray
+Write-Host "  - Summary files: results/baseline_*_summary.csv, results/smiley_*_summary.csv (include runtime)" -ForegroundColor Gray
+Write-Host ""
+Write-Host "Timing summary:" -ForegroundColor White
+python -c "
+import pandas as pd
+import glob
+summary_files = sorted(glob.glob('results/*_summary.csv'))
+if summary_files:
+    dfs = []
+    for f in summary_files:
+        df = pd.read_csv(f)
+        if 'Runtime_seconds' in df.columns:
+            dfs.append(df[['Model', 'ConstraintLevel', 'Runtime_seconds', 'Runtime_formatted']])
+    if dfs:
+        timing_df = pd.concat(dfs, ignore_index=True)
+        print('')
+        for _, row in timing_df.iterrows():
+            print(f\"  {row['Model']:20s} {row['ConstraintLevel']:12s} {row['Runtime_formatted']:8s} ({row['Runtime_seconds']:.1f}s)\")
+        total_time = timing_df['Runtime_seconds'].sum()
+        total_min = int(total_time // 60)
+        total_sec = int(total_time % 60)
+        print(f\"\n  {'Total generation time:':20s} {total_min}m {total_sec}s ({total_time:.1f}s)\")
+    else:
+        print('  No timing data found in summary files')
+else:
+    print('  No summary files found')
+"
 Write-Host ""
 Write-Host "To evaluate results, run:" -ForegroundColor Cyan
 Write-Host "  python -m src.evaluate" -ForegroundColor Yellow

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -192,6 +193,8 @@ def run_constraint_experiment(
     """
     Run a single constraint-level experiment using all available prefixes.
     """
+    start_time = time.time()
+    
     # Load constraint ranges for this level
     constraint_ranges = load_property_ranges(property_ranges_path, dataset, constraint_level)
     
@@ -240,15 +243,24 @@ def run_constraint_experiment(
     df = df[columns]
     df.to_csv(out_csv, index=False)
     
+    # Calculate elapsed time
+    elapsed_time = time.time() - start_time
+    
     # Create summary
     summary = summarise_adherence(df)
     summary["ConstraintLevel"] = constraint_level
     summary["Model"] = "GPT2-Zinc-87M"
     summary["Prompt"] = "multi_prefix"
     summary["Temperature"] = temperature
+    summary["Runtime_seconds"] = elapsed_time
+    summary["Runtime_minutes"] = elapsed_time / 60.0
+    summary["Runtime_formatted"] = f"{int(elapsed_time // 60)}m {int(elapsed_time % 60)}s"
     
     summary_df = pd.DataFrame([summary])
     summary_df.to_csv(summary_csv, index=False)
+    
+    # Print timing info
+    print(f"  Completed in {summary['Runtime_formatted']} ({elapsed_time:.1f} seconds)")
     
     return df
 

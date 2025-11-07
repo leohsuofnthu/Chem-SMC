@@ -12,6 +12,9 @@ PROPERTY_RANGES="data/train_property_ranges.json"
 DATASET="Combined"
 N=1000
 
+# Record overall start time
+SCRIPT_START_TIME=$(date +%s)
+
 echo "=========================================="
 echo "Simplified Constraint-Based Experiments"
 echo "=========================================="
@@ -89,15 +92,53 @@ if files:
 "
 
 
+# Calculate total runtime
+SCRIPT_END_TIME=$(date +%s)
+SCRIPT_RUNTIME=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
+SCRIPT_RUNTIME_MIN=$((SCRIPT_RUNTIME / 60))
+SCRIPT_RUNTIME_SEC=$((SCRIPT_RUNTIME % 60))
+
 echo ""
 echo "=========================================="
 echo "Experiments completed!"
 echo "=========================================="
 echo ""
+echo "Total runtime: ${SCRIPT_RUNTIME_MIN}m ${SCRIPT_RUNTIME_SEC}s"
+echo ""
 echo "Results saved to:"
 echo "  - results/baseline_results.csv (combined - 3 constraint levels)"
 echo "  - results/smiley_results.csv (combined - 3 constraint levels)"
 echo "  - Individual files: results/baseline_*_results.csv, results/smiley_*_results.csv"
+echo "  - Summary files: results/baseline_*_summary.csv, results/smiley_*_summary.csv (include runtime)"
+echo ""
+echo "Timing summary:"
+python -c "
+import pandas as pd
+import glob
+import sys
+
+summary_files = sorted(glob.glob('results/*_summary.csv'))
+if summary_files:
+    dfs = []
+    for f in summary_files:
+        df = pd.read_csv(f)
+        if 'Runtime_seconds' in df.columns:
+            dfs.append(df[['Model', 'ConstraintLevel', 'Runtime_seconds', 'Runtime_formatted']])
+    if dfs:
+        timing_df = pd.concat(dfs, ignore_index=True)
+        print('')
+        for _, row in timing_df.iterrows():
+            print(f\"  {row['Model']:20s} {row['ConstraintLevel']:12s} {row['Runtime_formatted']:8s} ({row['Runtime_seconds']:.1f}s)\")
+        total_time = timing_df['Runtime_seconds'].sum()
+        total_min = int(total_time // 60)
+        total_sec = int(total_time % 60)
+        print(f\"\n  {'Total generation time:':20s} {total_min}m {total_sec}s ({total_time:.1f}s)\")
+    else:
+        print('  No timing data found in summary files')
+else:
+    print('  No summary files found')
+"
+
 echo ""
 echo "To evaluate results, run:"
 echo "  python -m src.evaluate"
