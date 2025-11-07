@@ -59,9 +59,42 @@ if files:
     print(f'  Combined {len(files)} files into baseline_results.csv')
 "
 
-# 2. SmileyLlama (constraint variants)
+# 2. GPT2-Zinc+SMC (SMC-guided generation)
 echo ""
-echo "[2/2] Running SmileyLlama with constraint variants..."
+echo "[2/3] Running GPT2-Zinc+SMC with SMC-guided generation..."
+for level in "${CONSTRAINT_LEVELS[@]}"; do
+    echo "  - Constraint level: $level"
+    python -m src.smc_generate_constraint \
+        --constraint-level "$level" \
+        --property-ranges "$PROPERTY_RANGES" \
+        --dataset "$DATASET" \
+        --n "$N" \
+        --particles 50 \
+        --ess-threshold 0.3 \
+        --temperature 0.7 \
+        --top_p 0.9 \
+        --max-new-tokens 60 \
+        --top-k 30 \
+        --out-csv "results/smc_${level}_results.csv" \
+        --summary-csv "results/smc_${level}_summary.csv"
+done
+
+# Combine SMC results
+echo "  - Combining SMC results..."
+python -c "
+import pandas as pd
+import glob
+files = sorted(glob.glob('results/smc_*_results.csv'))
+if files:
+    dfs = [pd.read_csv(f) for f in files]
+    combined = pd.concat(dfs, ignore_index=True)
+    combined.to_csv('results/smc_results.csv', index=False)
+    print(f'  Combined {len(files)} files into smc_results.csv')
+"
+
+# 3. SmileyLlama (constraint variants)
+echo ""
+echo "[3/3] Running SmileyLlama with constraint variants..."
 for level in "${CONSTRAINT_LEVELS[@]}"; do
     echo "  - Constraint level: $level"
     python -m src.smiley_generate_constraint \
@@ -107,9 +140,10 @@ echo "Total runtime: ${SCRIPT_RUNTIME_MIN}m ${SCRIPT_RUNTIME_SEC}s"
 echo ""
 echo "Results saved to:"
 echo "  - results/baseline_results.csv (combined - 3 constraint levels)"
+echo "  - results/smc_results.csv (combined - 3 constraint levels)"
 echo "  - results/smiley_results.csv (combined - 3 constraint levels)"
-echo "  - Individual files: results/baseline_*_results.csv, results/smiley_*_results.csv"
-echo "  - Summary files: results/baseline_*_summary.csv, results/smiley_*_summary.csv (include runtime)"
+echo "  - Individual files: results/baseline_*_results.csv, results/smc_*_results.csv, results/smiley_*_results.csv"
+echo "  - Summary files: results/*_summary.csv (include runtime)"
 echo ""
 echo "Timing summary:"
 python -c "

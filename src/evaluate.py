@@ -1,10 +1,14 @@
 """
-Evaluation utilities for GPT2-Zinc+SMC vs SmileyLlama experiments.
+Evaluation utilities for GPT2-Zinc baseline vs SmileyLlama experiments.
 Focuses on constraint-based generation metrics: Adherence, Validity, Distinctness, Diversity.
+
+Automatically loads individual experiment result files (baseline_*_results.csv, smiley_*_results.csv)
+or combined files if available.
 """
 from __future__ import annotations
 
 import argparse
+import glob
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -14,15 +18,43 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, DataStructs
 from rdkit import RDLogger
 
+from .utils import ensure_directory
+
 # Suppress RDKit SMILES parse error messages
 RDLogger.DisableLog("rdApp.*")
 
 
 def _load_results(path: str) -> pd.DataFrame:
+    """Load a single results CSV file."""
     df = pd.read_csv(path)
     if "Valid" not in df.columns:
         df["Valid"] = df["SMILES"].apply(lambda s: Chem.MolFromSmiles(s) is not None)
     return df
+
+
+def _load_results_by_pattern(pattern: str) -> pd.DataFrame:
+    """
+    Load all results files matching a glob pattern and combine them.
+    
+    Args:
+        pattern: Glob pattern to match result files (e.g., 'results/baseline_*_results.csv')
+    
+    Returns:
+        Combined DataFrame, or empty DataFrame if no files found.
+    """
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return pd.DataFrame()
+    
+    dfs = []
+    for f in files:
+        df = _load_results(f)
+        dfs.append(df)
+    
+    if not dfs:
+        return pd.DataFrame()
+    
+    return pd.concat(dfs, ignore_index=True)
 
 
 def _valid_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -128,26 +160,114 @@ Examples:
   python -m src.evaluate --temperature 1.0
         """
     )
-    parser.add_argument("--baseline", type=str, default="results/baseline_results.csv")
-    parser.add_argument("--smc", type=str, default="results/smc_results.csv")
-    parser.add_argument("--smiley", type=str, default="results/smiley_results.csv")
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        help="Baseline results file or pattern. Default: auto-detect results/baseline_*_results.csv"
+    )
+    parser.add_argument(
+        "--smc",
+        type=str,
+        default=None,
+        help="SMC results file or pattern. Default: auto-detect results/smc_*_results.csv"
+    )
+    parser.add_argument(
+        "--smiley",
+        type=str,
+        default=None,
+        help="SmileyLlama results file or pattern. Default: auto-detect results/smiley_*_results.csv"
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=str,
+        default="results",
+        help="Directory containing result files (default: results)"
+    )
     parser.add_argument("--temperature", type=float, default=None, help="Optional temperature filter.")
     parser.add_argument("--out-dir", type=str, default="results", help="Output directory for tables")
     parser.add_argument("--summary-table", type=str, default="results/summary_table.csv", help="Summary table output")
     parser.add_argument("--panel-table", type=str, default="results/panel_table.csv", help="Panel table output")
     args = parser.parse_args()
 
-    # Load generation results (SMC is optional - not in simplified pipeline)
-    baseline = _load_results(args.baseline)
-    smiley = _load_results(args.smiley)
+    # Auto-detect result files if not specified
+    results_dir = args.results_dir
     
-    # Try to load SMC if it exists (optional)
-    if Path(args.smc).exists():
-        smc = _load_results(args.smc)
-        combined = pd.concat([baseline, smc, smiley], ignore_index=True)
+    if args.baseline is None:
+        # Try combined file first, then individual files
+        baseline_combined = Path(results_dir) / "baseline_results.csv"
+        if baseline_combined.exists():
+            baseline = _load_results(str(baseline_combined))
+        else:
+            baseline = _load_results_by_pattern(f"{results_dir}/baseline_*_results.csv")
     else:
-        # SMC results not available (simplified pipeline doesn't include it)
-        combined = pd.concat([baseline, smiley], ignore_index=True)
+        if "*" in args.baseline:
+            baseline = _load_results_by_pattern(args.baseline)
+        else:
+            baseline = _load_results(args.baseline)
+    
+    if args.smc is None:
+        # Try combined file first, then individual files
+        smc_combined = Path(results_dir) / "smc_results.csv"
+        if smc_combined.exists():
+            smc = _load_results(str(smc_combined))
+        else:
+            smc = _load_results_by_pattern(f"{results_dir}/smc_*_results.csv")
+    else:
+        if "*" in args.smc:
+            smc = _load_results_by_pattern(args.smc)
+        else:
+            smc = _load_results(args.smc)
+    
+    if args.smiley is None:
+        # Try combined file first, then individual files
+        smiley_combined = Path(results_dir) / "smiley_results.csv"
+        if smiley_combined.exists():
+            smiley = _load_results(str(smiley_combined))
+        else:
+            smiley = _load_results_by_pattern(f"{results_dir}/smiley_*_results.csv")
+    else:
+        if "*" in args.smiley:
+            smiley = _load_results_by_pattern(args.smiley)
+        else:
+            smiley = _load_results(args.smiley)
+    
+    # Combine all results
+    if baseline.empty and smc.empty and smiley.empty:
+        print("Error: No result files found!")
+        print(f"  Looked in: {results_dir}/")
+        print("  Expected files: baseline_*_results.csv, smc_*_results.csv, or smiley_*_results.csv")
+        return
+    
+    dfs_to_combine = []
+    if not baseline.empty:
+        dfs_to_combine.append(baseline)
+        if args.baseline is None:
+            baseline_files = glob.glob(f"{results_dir}/baseline_*_results.csv")
+            file_count = len(baseline_files) if baseline_files else 0
+        else:
+            file_count = 1
+        print(f"Loaded {len(baseline)} baseline molecules from {file_count} file(s)")
+    
+    if not smc.empty:
+        dfs_to_combine.append(smc)
+        if args.smc is None:
+            smc_files = glob.glob(f"{results_dir}/smc_*_results.csv")
+            file_count = len(smc_files) if smc_files else 0
+        else:
+            file_count = 1
+        print(f"Loaded {len(smc)} SMC molecules from {file_count} file(s)")
+    
+    if not smiley.empty:
+        dfs_to_combine.append(smiley)
+        if args.smiley is None:
+            smiley_files = glob.glob(f"{results_dir}/smiley_*_results.csv")
+            file_count = len(smiley_files) if smiley_files else 0
+        else:
+            file_count = 1
+        print(f"Loaded {len(smiley)} SmileyLlama molecules from {file_count} file(s)")
+    
+    combined = pd.concat(dfs_to_combine, ignore_index=True) if dfs_to_combine else pd.DataFrame()
 
     ensure_directory(Path(args.out_dir).as_posix())
     

@@ -46,9 +46,33 @@ foreach ($level in $ConstraintLevels) {
 Write-Host "  - Combining baseline results..." -ForegroundColor Yellow
 python -c "import pandas as pd; import glob; files = sorted(glob.glob('results/baseline_*_results.csv')); dfs = [pd.read_csv(f) for f in files] if files else []; pd.concat(dfs, ignore_index=True).to_csv('results/baseline_results.csv', index=False) if dfs else None; print(f'  Combined {len(files)} files into baseline_results.csv') if files else print('  No files to combine')"
 
-# 2. SmileyLlama (constraint variants)
+# 2. GPT2-Zinc+SMC (SMC-guided generation)
 Write-Host ""
-Write-Host "[2/2] Running SmileyLlama with constraint variants..." -ForegroundColor Green
+Write-Host "[2/3] Running GPT2-Zinc+SMC with SMC-guided generation..." -ForegroundColor Green
+foreach ($level in $ConstraintLevels) {
+    Write-Host "  - Constraint level: $level" -ForegroundColor Yellow
+    python -m src.smc_generate_constraint `
+        --constraint-level $level `
+        --property-ranges $PropertyRanges `
+        --dataset $Dataset `
+        --n $N `
+        --particles 50 `
+        --ess-threshold 0.3 `
+        --temperature 0.7 `
+        --top_p 0.9 `
+        --max-new-tokens 60 `
+        --top-k 30 `
+        --out-csv "results/smc_${level}_results.csv" `
+        --summary-csv "results/smc_${level}_summary.csv"
+}
+
+# Combine SMC results
+Write-Host "  - Combining SMC results..." -ForegroundColor Yellow
+python -c "import pandas as pd; import glob; files = sorted(glob.glob('results/smc_*_results.csv')); dfs = [pd.read_csv(f) for f in files] if files else []; pd.concat(dfs, ignore_index=True).to_csv('results/smc_results.csv', index=False) if dfs else None; print(f'  Combined {len(files)} files into smc_results.csv') if files else print('  No files to combine')"
+
+# 3. SmileyLlama (constraint variants)
+Write-Host ""
+Write-Host "[3/3] Running SmileyLlama with constraint variants..." -ForegroundColor Green
 foreach ($level in $ConstraintLevels) {
     Write-Host "  - Constraint level: $level" -ForegroundColor Yellow
     python -m src.smiley_generate_constraint `
@@ -84,9 +108,10 @@ Write-Host "Total runtime: ${ScriptRuntimeMin}m ${ScriptRuntimeSec}s" -Foregroun
 Write-Host ""
 Write-Host "Results saved to:" -ForegroundColor White
 Write-Host "  - results/baseline_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
+Write-Host "  - results/smc_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
 Write-Host "  - results/smiley_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
-Write-Host "  - Individual files: results/baseline_*_results.csv, results/smiley_*_results.csv" -ForegroundColor Gray
-Write-Host "  - Summary files: results/baseline_*_summary.csv, results/smiley_*_summary.csv (include runtime)" -ForegroundColor Gray
+Write-Host "  - Individual files: results/baseline_*_results.csv, results/smc_*_results.csv, results/smiley_*_results.csv" -ForegroundColor Gray
+Write-Host "  - Summary files: results/*_summary.csv (include runtime)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Timing summary:" -ForegroundColor White
 python -c "
