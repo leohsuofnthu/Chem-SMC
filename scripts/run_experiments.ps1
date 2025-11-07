@@ -1,57 +1,83 @@
-# PowerShell script to run experiments
-param(
-    [string]$DataInput = "data/zinc250k.csv"
-)
+# PowerShell script to run simplified constraint-based experiments
+# Simplified pipeline: 2 models × 3 constraint levels = 6 experiments
 
-# Set error action preference
 $ErrorActionPreference = "Stop"
 
-# SMILEY prompts (instruction-style for instruction-tuned model)
-$SmileyPrompts = @("lipinski", "mw_logp_rotb", "tpsa_fsp3", "druglike_qed")
+$ConstraintLevels = @("loose", "tight", "ultra_tight")
+$PropertyRanges = "data/train_property_ranges.json"
+$Dataset = "Combined"
+$N = 1000
 
-# GPT-Zinc prompts (prefix-style for base model)
-$GptZincPrompts = @("aromatic_core", "amino_aliphatic", "polar_ether", "carbonyl_anchor", "heterocycle_friendly", "sulfur_phosphorus", "extended_polar", "fallback_generic")
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Simplified Constraint-Based Experiments" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Constraint levels: $($ConstraintLevels -join ', ')" -ForegroundColor White
+Write-Host "Property ranges: $PropertyRanges" -ForegroundColor White
+Write-Host "Dataset: $Dataset" -ForegroundColor White
+Write-Host ""
 
-$SmileyTemps = @("1.0", "0.7")
-$SmcTemps = @("1.2", "1.0")
+# Check if property ranges file exists
+if (-not (Test-Path $PropertyRanges)) {
+    Write-Host "Error: Property ranges file not found: $PropertyRanges" -ForegroundColor Red
+    Write-Host "Please run: python -m src.analyze_train_data" -ForegroundColor Yellow
+    exit 1
+}
 
-# Convert arrays to space-separated strings for Python arguments
-$SmileyPromptArgs = $SmileyPrompts -join " "
-$GptZincPromptArgs = $GptZincPrompts -join " "
-$SmileyTempArgs = $SmileyTemps -join " "
-$SmcTempArgs = $SmcTemps -join " "
+# 1. GPT2-Zinc Baseline (multi-prefix, constraint-filtered)
+Write-Host "[1/2] Running GPT2-Zinc baseline with multi-prefix constraint filtering..." -ForegroundColor Green
+foreach ($level in $ConstraintLevels) {
+    Write-Host "  - Constraint level: $level" -ForegroundColor Yellow
+    python -m src.baseline_generate_constraint `
+        --constraint-level $level `
+        --property-ranges $PropertyRanges `
+        --dataset $Dataset `
+        --n $N `
+        --temperature 1.0 `
+        --top_p 0.9 `
+        --batch_size 256 `
+        --out-csv "results/baseline_${level}_results.csv" `
+        --summary-csv "results/baseline_${level}_summary.csv"
+}
 
-# Write-Host "[1/4] Preparing ZINC data splits..." -ForegroundColor Green
-# # python -m src.data_prep --input "$DataInput"
+# Combine baseline results
+Write-Host "  - Combining baseline results..." -ForegroundColor Yellow
+python -c "import pandas as pd; import glob; files = sorted(glob.glob('results/baseline_*_results.csv')); dfs = [pd.read_csv(f) for f in files] if files else []; pd.concat(dfs, ignore_index=True).to_csv('results/baseline_results.csv', index=False) if dfs else None; print(f'  Combined {len(files)} files into baseline_results.csv') if files else print('  No files to combine')"
 
-Write-Host "[2/4] Running baseline GPT2-Zinc generation with strategic prompts..." -ForegroundColor Green
-python -m src.baseline_generate `
-  --prompts $GptZincPromptArgs `
-  --n 1000 `
-  --temperature 1.0 `
-  --top_p 0.9 `
-  --batch_size 256 `
-  --out_csv results/baseline_results.csv `
-  --summary_csv results/baseline_summary.csv
+# 2. SmileyLlama (constraint variants)
+Write-Host ""
+Write-Host "[2/2] Running SmileyLlama with constraint variants..." -ForegroundColor Green
+foreach ($level in $ConstraintLevels) {
+    Write-Host "  - Constraint level: $level" -ForegroundColor Yellow
+    python -m src.smiley_generate_constraint `
+        --constraint-level $level `
+        --property-ranges $PropertyRanges `
+        --dataset $Dataset `
+        --base-prompt mw_logp_rotb `
+        --n $N `
+        --temperature 1.0 `
+        --top_p 0.9 `
+        --batch_size 128 `
+        --quantize `
+        --out-csv "results/smiley_${level}_results.csv" `
+        --summary-csv "results/smiley_${level}_summary.csv"
+}
 
-Write-Host "[3/4] Running SmileyLlama generation with instruction prompts..." -ForegroundColor Green
-python -m src.smiley_generate `
-  --prompts $SmileyPromptArgs `
-  --n 1000 `
-  --temperatures $SmileyTempArgs `
-  --top_p 0.9 `
-  --batch_size 128 `
-  --out_csv results/smiley_results.csv `
-  --summary_csv results/smiley_summary.csv
+# Combine SmileyLlama results
+Write-Host "  - Combining SmileyLlama results..." -ForegroundColor Yellow
+python -c "import pandas as pd; import glob; files = sorted(glob.glob('results/smiley_*_results.csv')); dfs = [pd.read_csv(f) for f in files] if files else []; pd.concat(dfs, ignore_index=True).to_csv('results/smiley_results.csv', index=False) if dfs else None; print(f'  Combined {len(files)} files into smiley_results.csv') if files else print('  No files to combine')"
 
-Write-Host "[4/4] Running GenLM SMC generation with strategic prompts..." -ForegroundColor Green
-python -m src.smc_generate `
-  --prompts $GptZincPromptArgs `
-  --n 100 `
-  --temperatures $SmcTempArgs `
-  --top_p 0.9 `
-  --particles 10 `
-  --out_csv results/smc_results.csv `
-  --summary_csv results/smc_summary.csv
-
-Write-Host "All experiments completed. Outputs written under results/." -ForegroundColor Green
+Write-Host ""
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Experiments completed!" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Results saved to:" -ForegroundColor White
+Write-Host "  - results/baseline_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
+Write-Host "  - results/smiley_results.csv (combined - 3 constraint levels)" -ForegroundColor Gray
+Write-Host "  - Individual files: results/baseline_*_results.csv, results/smiley_*_results.csv" -ForegroundColor Gray
+Write-Host ""
+Write-Host "To evaluate results, run:" -ForegroundColor Cyan
+Write-Host "  python -m src.evaluate" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "To generate plots, run:" -ForegroundColor Cyan
+Write-Host "  python -m src.plots" -ForegroundColor Yellow

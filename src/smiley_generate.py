@@ -16,8 +16,8 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 
 from .utils import (
-    PROMPTS,
-    PROMPT_MAP,
+    SMILEY_PROMPTS,
+    SMILEY_PROMPT_MAP,
     annotate_adherence,
     all_valid_smiles,
     compute_properties_df,
@@ -26,6 +26,19 @@ from .utils import (
 )
 
 MODEL_NAME = "THGLab/Llama-3.1-8B-SmileyLlama-1.1"
+
+# System message for SmileyLlama prompt template
+SMILEY_SYSTEM_MSG = "You love and excel at generating SMILES strings of drug-like molecules"
+
+
+def _format_smiley_prompt(user_instruction: str) -> str:
+    """
+    Format prompt for SmileyLlama using the expected template format.
+    
+    Format: ### Instruction:\n{system}\n\n### Input:\n{user}\n\n### Response:\n
+    This matches the format expected by SmileyLlama model.
+    """
+    return f"### Instruction:\n{SMILEY_SYSTEM_MSG}\n\n### Input:\n{user_instruction}\n\n### Response:\n"
 
 
 def _seed_all(seed: int) -> None:
@@ -88,7 +101,7 @@ def load_model(
 def _gather_smiles(
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
-    prompt: str,
+    prompt: str,  # This should be the formatted prompt with ### Instruction/### Input/### Response
     target_n: int,
     temperature: float,
     top_p: float,
@@ -98,6 +111,9 @@ def _gather_smiles(
     device = next(model.parameters()).device
     collected: List[str] = []
     seen = set()
+    
+    # Extract the response marker to find where the model's response starts
+    response_marker = "### Response:\n"
     
     # Create progress bar for Smiley generation
     pbar = tqdm(
@@ -129,7 +145,14 @@ def _gather_smiles(
             valid_count = 0
             batch_molecules = []
             for text in decoded:
-                body = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
+                # Extract response part (after "### Response:\n")
+                if response_marker in text:
+                    response_start = text.find(response_marker) + len(response_marker)
+                    body = text[response_start:].strip()
+                else:
+                    # Fallback: remove prompt prefix if response marker not found
+                    body = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
+                
                 smiles_list = all_valid_smiles(body)
                 for smi in smiles_list:
                     if smi not in seen:
@@ -171,11 +194,13 @@ def generate_for_prompt(
     seed: int = 0,
 ) -> pd.DataFrame:
     _seed_all(seed)
-    spec = PROMPT_MAP[prompt_name]
+    spec = SMILEY_PROMPT_MAP[prompt_name]
+    # Format the prompt using SmileyLlama's expected template
+    formatted_prompt = _format_smiley_prompt(spec.text)
     smiles = _gather_smiles(
         tokenizer,
         model,
-        spec.text,
+        formatted_prompt,  # Use formatted prompt with template
         target_n=n,
         temperature=temperature,
         top_p=top_p,
@@ -264,7 +289,7 @@ def run_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="SmileyLlama molecular generation.")
-    parser.add_argument("--prompts", nargs="+", default=[p.name for p in PROMPTS])
+    parser.add_argument("--prompts", nargs="+", default=[p.name for p in SMILEY_PROMPTS])
     parser.add_argument("--n", type=int, default=1_000)
     parser.add_argument("--temperatures", type=float, nargs="+", default=[1.0])
     parser.add_argument("--top_p", type=float, default=0.9)

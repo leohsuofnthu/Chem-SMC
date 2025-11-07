@@ -1,22 +1,18 @@
 """
 Shared utility functions for molecule generation experiments.
-
-Note: ChemGPT was trained with SELFIES library version 1.0.4.
-All SELFIES conversions use sf.decoder() and sf.encoder() functions
-from SELFIES 1.0.4 for compatibility.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
+import json
 
 import numpy as np
 import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
 import re
-import selfies as sf
 
 
 @dataclass(frozen=True)
@@ -27,10 +23,11 @@ class PromptSpec:
 
 
 # Instruction-style prompts for SMILEY (instruction-tuned model)
+# Format: "Output a SMILES string for..." to match SmileyLlama's expected format
 SMILEY_PROMPTS: List[PromptSpec] = [
     PromptSpec(
         name="lipinski",
-        text="Generate molecules satisfying Lipinski's rule of 5 (HBD <= 5, HBA <= 10, MW <= 500, logP <= 5).",
+        text="Output a SMILES string for a drug like molecule with the following properties: <= 5 H-bond donors, <= 10 H-bond acceptors, <= 500 molecular weight, <= 5 logP:",
         constraints={
             "HBD": (None, 5),
             "HBA": (None, 10),
@@ -40,7 +37,7 @@ SMILEY_PROMPTS: List[PromptSpec] = [
     ),
     PromptSpec(
         name="mw_logp_rotb",
-        text="Generate molecules with MW 300-400, logP 2-4, and Rotatable Bonds <= 7.",
+        text="Output a SMILES string for a molecule with the following properties: molecular weight 300-400, logP 2-4, and <= 7 rotatable bonds:",
         constraints={
             "MW": (300, 400),
             "logP": (2, 4),
@@ -49,7 +46,7 @@ SMILEY_PROMPTS: List[PromptSpec] = [
     ),
     PromptSpec(
         name="tpsa_fsp3",
-        text="Generate molecules with TPSA <= 90 and Fsp3 > 0.5.",
+        text="Output a SMILES string for a molecule with the following properties: <= 90 TPSA and > 0.5 Fsp3:",
         constraints={
             "TPSA": (None, 90),
             "Fsp3": (0.5, None),
@@ -57,7 +54,7 @@ SMILEY_PROMPTS: List[PromptSpec] = [
     ),
     PromptSpec(
         name="druglike_qed",
-        text="Generate a drug-like molecule.",
+        text="Output a SMILES string for a drug-like molecule:",
         constraints={
             # QED >= 0.6 is a common heuristic for drug-like behaviour.
             "QED": (0.6, None),
@@ -140,16 +137,9 @@ GPT_ZINC_PROMPTS: List[PromptSpec] = [
             "RotB": (None, 10),
         },
     ),
-]
-
-# Default to SMILEY prompts for backward compatibility
-PROMPTS: List[PromptSpec] = SMILEY_PROMPTS
-
-# SELFIES-based prefix prompts for ChemGPT-4.7M (uses SELFIES tokenization)
-CHEMGPT_PROMPTS: List[PromptSpec] = [
     PromptSpec(
-        name="aromatic_core",
-        text="[C][=C][C][=C]",  # SELFIES equivalent of "C1=CC=" - encourages aromatic rings
+        name="aliphatic_ring",
+        text="C1CCCCC1",  # Cyclohexane; low logP anchor without π system
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -157,8 +147,8 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
         },
     ),
     PromptSpec(
-        name="amino_aliphatic", 
-        text="[C][C][N]",  # SELFIES equivalent of "CCN" - introduces nitrogen for amines
+        name="aromatic_ring",
+        text="c1ccccc1",  # Benzene; aromatic core (complements aromatic_core)
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -166,8 +156,8 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
         },
     ),
     PromptSpec(
-        name="polar_ether",
-        text="[C][O][C]",  # SELFIES equivalent of "COC" - ether/alcohol functionality
+        name="hetero_aromatic",
+        text="n1ccccc1",  # Pyridine; hetero-aromatic ring
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -175,8 +165,8 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
         },
     ),
     PromptSpec(
-        name="carbonyl_anchor",
-        text="[C][C][=O]",  # SELFIES equivalent of "CC(=O)" - carbonyl groups
+        name="saturated_n_heterocycle",
+        text="N1CCCCC1",  # Piperidine; saturated N-heterocycle
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -184,8 +174,8 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
         },
     ),
     PromptSpec(
-        name="heterocycle_friendly",
-        text="[C][C][N][C]",  # SELFIES equivalent of "C1CN" - heterocycle templates
+        name="morpholine",
+        text="O1CCNCC1",  # Morpholine; O/N heterocycle (more specific than heterocycle_friendly)
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -193,8 +183,8 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
         },
     ),
     PromptSpec(
-        name="sulfur_phosphorus",
-        text="[C][C][S]",  # SELFIES equivalent of "CCS" - sulfur-containing groups
+        name="amide_starter",
+        text="NC(=O)",  # Amide starter from amine side
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -202,17 +192,53 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
         },
     ),
     PromptSpec(
-        name="extended_polar",
-        text="[C][C][O][C][C][N]",  # SELFIES equivalent of "CCOCCN" - extended polar chains
+        name="sulfonamide_starter",
+        text="NS(=O)(=O)",  # Sulfonamide starter
         constraints={
             "MW": (200, 500),
-            "logP": (2, 4),  # Specific logP range for drug-likeness
+            "logP": (0, 5),
             "RotB": (None, 10),
         },
     ),
     PromptSpec(
-        name="fallback_generic",
-        text="[C][C][C]",  # SELFIES equivalent of "CCC" - simple aliphatic baseline
+        name="urea",
+        text="NC(=O)N",  # Urea/guanidine flavor
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="ether_builder",
+        text="COC",  # Simple ether builder (similar to polar_ether, but explicit)
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="nitrile",
+        text="C#N",  # Nitrile handle
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="aryl_chloride",
+        text="Clc1ccccc1",  # Aryl chloride; halogen vector
+        constraints={
+            "MW": (200, 500),
+            "logP": (0, 5),
+            "RotB": (None, 10),
+        },
+    ),
+    PromptSpec(
+        name="phosphonate",
+        text="P(=O)(O)O",  # Phosphonate; branching; good for polar/charge
         constraints={
             "MW": (200, 500),
             "logP": (0, 5),
@@ -224,10 +250,6 @@ CHEMGPT_PROMPTS: List[PromptSpec] = [
 # Create prompt maps for both model types
 SMILEY_PROMPT_MAP = {p.name: p for p in SMILEY_PROMPTS}
 GPT_ZINC_PROMPT_MAP = {p.name: p for p in GPT_ZINC_PROMPTS}
-CHEMGPT_PROMPT_MAP = {p.name: p for p in CHEMGPT_PROMPTS}
-
-# Default prompt map (for backward compatibility)
-PROMPT_MAP = SMILEY_PROMPT_MAP
 
 PROPERTY_FNS = {
     "MW": Descriptors.MolWt,
@@ -369,94 +391,231 @@ def all_valid_smiles(text: str) -> List[str]:
     return hits
 
 
-def smiles_to_selfies(smiles: str) -> Optional[str]:
+
+
+def load_property_ranges(
+    json_path: str, 
+    dataset: str = "Combined",
+    constraint_level: str = "loose"
+) -> Dict[str, Tuple[float, float]]:
     """
-    Convert SMILES string to SELFIES string using SELFIES 1.0.4.
+    Load property ranges from JSON file.
     
     Args:
-        smiles: SMILES string to convert
+        json_path: Path to property ranges JSON file
+        dataset: Which dataset to use ("ZINC", "ChEMBL", or "Combined")
+        constraint_level: Which constraint level to use ("loose", "tight", or "ultra_tight")
+                         Default: "loose" (backward compatible)
         
     Returns:
-        SELFIES string or None if conversion fails
+        Dictionary mapping property names to (min, max) tuples
     """
-    try:
-        if not is_valid_smiles(smiles):
-            return None
-        # SELFIES 1.0.4 uses sf.encoder()
-        return sf.encoder(smiles)
-    except Exception:
-        return None
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    if dataset not in data:
+        raise ValueError(f"Dataset '{dataset}' not found in {json_path}. Available: {list(data.keys())}")
+    
+    # Check if data has new structure (with constraint levels) or old structure (flat)
+    dataset_data = data[dataset]
+    
+    if isinstance(dataset_data, dict) and any(k in dataset_data for k in ["loose", "tight", "ultra_tight"]):
+        # New structure with constraint levels
+        if constraint_level not in dataset_data:
+            raise ValueError(
+                f"Constraint level '{constraint_level}' not found in {json_path}. "
+                f"Available: {list(dataset_data.keys())}"
+            )
+        level_data = dataset_data[constraint_level]
+    else:
+        # Old flat structure (backward compatibility)
+        if constraint_level != "loose":
+            raise ValueError(
+                f"File {json_path} uses old flat structure. Only 'loose' constraint level available. "
+                f"Please regenerate with analyze_train_data.py to get all constraint levels."
+            )
+        level_data = dataset_data
+    
+    ranges = {}
+    for prop, value in level_data.items():
+        if isinstance(value, list) and len(value) == 2:
+            ranges[prop] = (float(value[0]), float(value[1]))
+        else:
+            raise ValueError(f"Invalid range format for property {prop}: {value}")
+    
+    return ranges
 
 
-def convert_selfies_to_smiles(selfies_text: str) -> Optional[str]:
+def compute_percentile_constraints(
+    df: pd.DataFrame,
+    properties: List[str],
+    q_low: float,
+    q_high: float,
+) -> Dict[str, Tuple[float, float]]:
     """
-    Convert SELFIES text to valid SMILES string using SELFIES 1.0.4.
+    Compute constraint ranges based on percentiles from a dataframe.
     
     Args:
-        selfies_text: Raw text containing SELFIES tokens
+        df: DataFrame with property columns
+        properties: List of property names to compute constraints for
+        q_low: Lower percentile (e.g., 0.25 for 25th percentile)
+        q_high: Upper percentile (e.g., 0.75 for 75th percentile)
         
     Returns:
-        Valid SMILES string or None if conversion fails
+        Dictionary mapping property names to (lower_bound, upper_bound) tuples
     """
-    try:
-        # First, clean up the text to extract SELFIES tokens
-        cleaned_text = selfies_text.strip()
-        
-        # Remove any non-SELFIES characters and normalize
-        # SELFIES tokens are enclosed in square brackets
-        import re
-        selfies_pattern = r'\[[^\]]+\]'
-        selfies_tokens = re.findall(selfies_pattern, cleaned_text)
-        
-        if not selfies_tokens:
-            return None
-            
-        # Join the SELFIES tokens into a proper SELFIES string
-        selfies_string = ''.join(selfies_tokens)
-        
-        # Convert SELFIES to SMILES using SELFIES 1.0.4 decoder
-        smiles = sf.decoder(selfies_string)
-        
-        # Validate the resulting SMILES
-        if smiles and is_valid_smiles(smiles):
-            return canonicalize_smiles(smiles)
-        
-        return None
-        
-    except Exception as e:
-        print(f"SELFIES conversion error: {e}")
-        return None
-
-
-def decode_chemgpt_generation(text: str) -> Optional[str]:
-    """
-    Decode ChemGPT generation output to valid SMILES.
+    valid_df = df[df["Valid"]].copy() if "Valid" in df.columns else df
+    constraints = {}
     
-    This function handles the specific tokenization used by ChemGPT-4.7M
-    which generates SELFIES tokens that need to be converted to SMILES.
+    for prop in properties:
+        if prop not in valid_df.columns:
+            continue
+        values = valid_df[prop].dropna()
+        if len(values) == 0:
+            continue
+        constraints[prop] = (float(values.quantile(q_low)), float(values.quantile(q_high)))
+    
+    return constraints
+
+
+def create_constraint_variant(
+    base_prompt: PromptSpec,
+    constraint_ranges: Dict[str, Tuple[float, float]],
+    tightness: str = "tight",
+) -> PromptSpec:
+    """
+    Create a variant of a prompt with modified constraints.
     
     Args:
-        text: Raw generated text from ChemGPT
+        base_prompt: Original PromptSpec to modify
+        constraint_ranges: Dictionary of property -> (min, max) ranges
+        tightness: Suffix to add to prompt name ("tight", "ultra_tight", etc.)
         
     Returns:
-        Valid SMILES string or None if conversion fails
+        New PromptSpec with modified constraints
     """
-    try:
-        # First try direct SELFIES conversion
-        smiles = convert_selfies_to_smiles(text)
-        if smiles:
-            return smiles
-            
-        # Fallback: try to extract and clean any SMILES-like patterns
-        # This handles cases where the model generates mixed content
-        candidates = iter_candidate_smiles(text)
-        for candidate in candidates:
-            canonical = canonicalize_smiles(candidate)
-            if canonical:
-                return canonical
-                
-        return None
+    # Create new constraints dict, using ranges for properties that exist in constraint_ranges
+    new_constraints = {}
+    
+    for prop, (lower, upper) in base_prompt.constraints.items():
+        if prop in constraint_ranges:
+            # Use the new range
+            new_constraints[prop] = constraint_ranges[prop]
+        else:
+            # Keep original constraint
+            new_constraints[prop] = (lower, upper)
+    
+    # Create new prompt name with tightness suffix
+    new_name = f"{base_prompt.name}_{tightness}"
+    
+    # Update prompt text for instruction-style prompts (SMILEY)
+    new_text = base_prompt.text
+    if any(prop in constraint_ranges for prop in ["MW", "logP", "RotB", "QED"]):
+        # Try to update the text with new ranges if it's an instruction prompt
+        if "MW" in constraint_ranges:
+            mw_min, mw_max = constraint_ranges["MW"]
+            if "mw" in base_prompt.text.lower() or "molecular weight" in base_prompt.text.lower():
+                new_text = new_text.replace("MW", f"MW {mw_min:.0f}-{mw_max:.0f}")
+        if "logP" in constraint_ranges:
+            logp_min, logp_max = constraint_ranges["logP"]
+            if "logp" in base_prompt.text.lower():
+                new_text = new_text.replace("logP", f"logP {logp_min:.1f}-{logp_max:.1f}")
+    
+    return PromptSpec(
+        name=new_name,
+        text=new_text,
+        constraints=new_constraints,
+    )
+
+
+def generate_constraint_variants_from_ranges(
+    base_prompts: List[PromptSpec],
+    property_ranges_path: str,
+    dataset: str = "Combined",
+    constraint_levels: Optional[List[str]] = None,
+) -> Dict[str, PromptSpec]:
+    """
+    Generate prompt variants with different constraint tightness levels using pre-computed ranges.
+    
+    This function uses the pre-computed constraint levels from analyze_train_data.py.
+    The ranges file should contain all constraint levels (loose, tight, ultra_tight).
+    
+    Args:
+        base_prompts: List of base PromptSpec objects
+        property_ranges_path: Path to property ranges JSON file (with all constraint levels)
+        dataset: Which dataset to use for ranges ("ZINC", "ChEMBL", or "Combined")
+        constraint_levels: Optional list of constraint level names to generate variants for.
+                          Default: ["tight", "ultra_tight"] (loose is the base)
         
-    except Exception as e:
-        print(f"ChemGPT decoder error: {e}")
-        return None
+    Returns:
+        Dictionary mapping prompt names to PromptSpec objects (includes all variants)
+    """
+    if constraint_levels is None:
+        constraint_levels = ["tight", "ultra_tight"]
+    
+    # Properties we care about for constraints
+    target_props = ["MW", "logP", "RotB", "QED"]
+    
+    # Generate variants for each constraint level
+    prompt_map = {}
+    
+    # First, add all base prompts (these use loose constraints)
+    for prompt in base_prompts:
+        prompt_map[prompt.name] = prompt
+    
+    # Then, generate variants for each tightness level
+    for level_name in constraint_levels:
+        # Load constraints for this level
+        try:
+            level_constraints = load_property_ranges(property_ranges_path, dataset, level_name)
+        except (ValueError, KeyError) as e:
+            print(f"Warning: Could not load constraint level '{level_name}': {e}")
+            print("Skipping this constraint level. Make sure to run analyze_train_data.py first.")
+            continue
+        
+        # Create variants for each base prompt
+        for prompt in base_prompts:
+            # Only create variant if prompt uses at least one of our target properties
+            if any(prop in prompt.constraints for prop in target_props):
+                variant = create_constraint_variant(prompt, level_constraints, level_name)
+                prompt_map[variant.name] = variant
+    
+    return prompt_map
+
+
+def load_constraint_variants(
+    property_ranges_path: str = "data/train_property_ranges.json",
+    dataset: str = "Combined",
+    prompt_type: str = "gpt_zinc",
+) -> Dict[str, PromptSpec]:
+    """
+    Convenience function to load constraint variants for experiments.
+    
+    This is a simple wrapper that loads pre-computed constraint variants.
+    Run analyze_train_data.py first to generate the property ranges file.
+    
+    Args:
+        property_ranges_path: Path to property ranges JSON file
+        dataset: Which dataset to use ("ZINC", "ChEMBL", or "Combined")
+        prompt_type: Which prompt set to use ("gpt_zinc" or "smiley")
+        
+    Returns:
+        Dictionary mapping prompt names to PromptSpec objects (includes all variants)
+        
+    Example:
+        >>> variants = load_constraint_variants()
+        >>> # Now you can use: "mw_logp_rotb", "mw_logp_rotb_tight", "mw_logp_rotb_ultra_tight"
+        >>> prompt = variants["mw_logp_rotb_tight"]
+    """
+    if prompt_type == "gpt_zinc":
+        base_prompts = GPT_ZINC_PROMPTS
+    elif prompt_type == "smiley":
+        base_prompts = SMILEY_PROMPTS
+    else:
+        raise ValueError(f"Unknown prompt_type: {prompt_type}. Use 'gpt_zinc' or 'smiley'")
+    
+    return generate_constraint_variants_from_ranges(
+        base_prompts=base_prompts,
+        property_ranges_path=property_ranges_path,
+        dataset=dataset,
+    )
