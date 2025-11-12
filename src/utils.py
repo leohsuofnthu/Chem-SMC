@@ -4,7 +4,6 @@ Shared utility functions for molecule generation experiments.
 from __future__ import annotations
 
 import json
-import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -272,10 +271,6 @@ PROPERTY_COLUMNS = ["MW", "logP", "RotB", "HBD", "HBA", "TPSA", "QED"]
 SMILES_PATTERN = re.compile(r"[A-Za-z0-9@+\-\[\]\(\)=#\\/]+")
 
 
-def is_valid_smiles(smiles: str) -> bool:
-    return Chem.MolFromSmiles(smiles) is not None
-
-
 def canonicalize_smiles(smiles: str) -> Optional[str]:
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -397,7 +392,6 @@ def all_valid_smiles(text: str) -> List[str]:
 
 
 
-
 def load_property_ranges(
     json_path: str, 
     dataset: str = "Combined",
@@ -514,17 +508,96 @@ def create_constraint_variant(
     new_name = f"{base_prompt.name}_{tightness}"
     
     # Update prompt text for instruction-style prompts (SMILEY)
+    # Use regex to properly replace constraint values in the prompt text
     new_text = base_prompt.text
     if any(prop in constraint_ranges for prop in ["MW", "logP", "RotB", "QED"]):
-        # Try to update the text with new ranges if it's an instruction prompt
+        # Update molecular weight - match patterns like "molecular weight 300-400" or "MW 300-400"
         if "MW" in constraint_ranges:
             mw_min, mw_max = constraint_ranges["MW"]
-            if "mw" in base_prompt.text.lower() or "molecular weight" in base_prompt.text.lower():
-                new_text = new_text.replace("MW", f"MW {mw_min:.0f}-{mw_max:.0f}")
+            if "molecular weight" in base_prompt.text.lower():
+                # Replace "molecular weight 300-400" pattern
+                new_text = re.sub(
+                    r'molecular weight\s+\d+-\d+',
+                    f'molecular weight {mw_min:.0f}-{mw_max:.0f}',
+                    new_text,
+                    flags=re.IGNORECASE
+                )
+            elif "MW" in base_prompt.text:
+                # Replace "MW 300-400" pattern (if MW appears as abbreviation)
+                new_text = re.sub(
+                    r'MW\s+\d+-\d+',
+                    f'MW {mw_min:.0f}-{mw_max:.0f}',
+                    new_text
+                )
+        
+        # Update logP - match patterns like "logP 2-4" or "logP 2.0-4.0"
         if "logP" in constraint_ranges:
             logp_min, logp_max = constraint_ranges["logP"]
             if "logp" in base_prompt.text.lower():
-                new_text = new_text.replace("logP", f"logP {logp_min:.1f}-{logp_max:.1f}")
+                # Replace "logP 2-4" or "logP 2.0-4.0" patterns
+                new_text = re.sub(
+                    r'logP\s+[\d.]+-[\d.]+',
+                    f'logP {logp_min:.1f}-{logp_max:.1f}',
+                    new_text,
+                    flags=re.IGNORECASE
+                )
+        
+        # Update rotatable bonds - match patterns like "<= 7 rotatable bonds"
+        if "RotB" in constraint_ranges:
+            rotb_min, rotb_max = constraint_ranges["RotB"]
+            if "rotatable" in base_prompt.text.lower():
+                # Check if text has both min and max, or just one bound
+                has_min_pattern = bool(re.search(r'>=\s*\d+\s+rotatable bonds', new_text, re.IGNORECASE))
+                has_max_pattern = bool(re.search(r'<=\s*\d+\s+rotatable bonds', new_text, re.IGNORECASE))
+                
+                if rotb_min is not None and rotb_min > 0 and rotb_max is not None:
+                    # We have both min and max constraints
+                    if has_min_pattern and has_max_pattern:
+                        # Replace both patterns
+                        new_text = re.sub(
+                            r'>=\s*\d+\s+rotatable bonds',
+                            f'>= {rotb_min:.0f} rotatable bonds',
+                            new_text,
+                            flags=re.IGNORECASE
+                        )
+                        new_text = re.sub(
+                            r'<=\s*\d+\s+rotatable bonds',
+                            f'<= {rotb_max:.0f} rotatable bonds',
+                            new_text,
+                            flags=re.IGNORECASE
+                        )
+                    elif has_max_pattern and not has_min_pattern:
+                        # Only upper bound in text, but we need both - convert to range format
+                        new_text = re.sub(
+                            r'<=\s*\d+\s+rotatable bonds',
+                            f'{rotb_min:.0f}-{rotb_max:.0f} rotatable bonds',
+                            new_text,
+                            flags=re.IGNORECASE
+                        )
+                    elif has_min_pattern and not has_max_pattern:
+                        # Only lower bound in text, but we need both - add upper bound
+                        new_text = re.sub(
+                            r'>=\s*\d+\s+rotatable bonds',
+                            f'{rotb_min:.0f}-{rotb_max:.0f} rotatable bonds',
+                            new_text,
+                            flags=re.IGNORECASE
+                        )
+                elif rotb_max is not None:
+                    # Only upper bound constraint
+                    new_text = re.sub(
+                        r'<=\s*\d+\s+rotatable bonds',
+                        f'<= {rotb_max:.0f} rotatable bonds',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                elif rotb_min is not None and rotb_min > 0:
+                    # Only lower bound constraint
+                    new_text = re.sub(
+                        r'>=\s*\d+\s+rotatable bonds',
+                        f'>= {rotb_min:.0f} rotatable bonds',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
     
     return PromptSpec(
         name=new_name,
@@ -532,95 +605,3 @@ def create_constraint_variant(
         constraints=new_constraints,
     )
 
-
-def generate_constraint_variants_from_ranges(
-    base_prompts: List[PromptSpec],
-    property_ranges_path: str,
-    dataset: str = "Combined",
-    constraint_levels: Optional[List[str]] = None,
-) -> Dict[str, PromptSpec]:
-    """
-    Generate prompt variants with different constraint tightness levels using pre-computed ranges.
-    
-    This function uses the pre-computed constraint levels from analyze_train_data.py.
-    The ranges file should contain all constraint levels (loose, tight, ultra_tight).
-    
-    Args:
-        base_prompts: List of base PromptSpec objects
-        property_ranges_path: Path to property ranges JSON file (with all constraint levels)
-        dataset: Which dataset to use for ranges ("ZINC", "ChEMBL", or "Combined")
-        constraint_levels: Optional list of constraint level names to generate variants for.
-                          Default: ["tight", "ultra_tight"] (loose is the base)
-        
-    Returns:
-        Dictionary mapping prompt names to PromptSpec objects (includes all variants)
-    """
-    if constraint_levels is None:
-        constraint_levels = ["tight", "ultra_tight"]
-    
-    # Properties we care about for constraints
-    target_props = ["MW", "logP", "RotB", "QED"]
-    
-    # Generate variants for each constraint level
-    prompt_map = {}
-    
-    # First, add all base prompts (these use loose constraints)
-    for prompt in base_prompts:
-        prompt_map[prompt.name] = prompt
-    
-    # Then, generate variants for each tightness level
-    for level_name in constraint_levels:
-        # Load constraints for this level
-        try:
-            level_constraints = load_property_ranges(property_ranges_path, dataset, level_name)
-        except (ValueError, KeyError) as e:
-            print(f"Warning: Could not load constraint level '{level_name}': {e}")
-            print("Skipping this constraint level. Make sure to run analyze_train_data.py first.")
-            continue
-        
-        # Create variants for each base prompt
-        for prompt in base_prompts:
-            # Only create variant if prompt uses at least one of our target properties
-            if any(prop in prompt.constraints for prop in target_props):
-                variant = create_constraint_variant(prompt, level_constraints, level_name)
-                prompt_map[variant.name] = variant
-    
-    return prompt_map
-
-
-def load_constraint_variants(
-    property_ranges_path: str = "data/train_property_ranges.json",
-    dataset: str = "Combined",
-    prompt_type: str = "gpt_zinc",
-) -> Dict[str, PromptSpec]:
-    """
-    Convenience function to load constraint variants for experiments.
-    
-    This is a simple wrapper that loads pre-computed constraint variants.
-    Run analyze_train_data.py first to generate the property ranges file.
-    
-    Args:
-        property_ranges_path: Path to property ranges JSON file
-        dataset: Which dataset to use ("ZINC", "ChEMBL", or "Combined")
-        prompt_type: Which prompt set to use ("gpt_zinc" or "smiley")
-        
-    Returns:
-        Dictionary mapping prompt names to PromptSpec objects (includes all variants)
-        
-    Example:
-        >>> variants = load_constraint_variants()
-        >>> # Now you can use: "mw_logp_rotb", "mw_logp_rotb_tight", "mw_logp_rotb_ultra_tight"
-        >>> prompt = variants["mw_logp_rotb_tight"]
-    """
-    if prompt_type == "gpt_zinc":
-        base_prompts = GPT_ZINC_PROMPTS
-    elif prompt_type == "smiley":
-        base_prompts = SMILEY_PROMPTS
-    else:
-        raise ValueError(f"Unknown prompt_type: {prompt_type}. Use 'gpt_zinc' or 'smiley'")
-    
-    return generate_constraint_variants_from_ranges(
-        base_prompts=base_prompts,
-        property_ranges_path=property_ranges_path,
-        dataset=dataset,
-    )

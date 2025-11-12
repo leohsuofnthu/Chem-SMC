@@ -59,15 +59,9 @@ def run_constraint_experiment(
     # Get base prompt
     base_prompt = SMILEY_PROMPT_MAP[base_prompt_name]
     
-    # Create constraint variant
-    if constraint_level == "loose":
-        # Use base prompt as-is
-        constraint_prompt = base_prompt
-        prompt_variant_name = base_prompt_name
-    else:
-        # Create variant with tighter constraints
-        constraint_prompt = create_constraint_variant(base_prompt, constraint_ranges, tightness=constraint_level)
-        prompt_variant_name = f"{base_prompt_name}_{constraint_level}"
+    # Create constraint variant for ALL levels (including loose) to ensure prompt text matches evaluation constraints
+    constraint_prompt = create_constraint_variant(base_prompt, constraint_ranges, tightness=constraint_level)
+    prompt_variant_name = f"{base_prompt_name}_{constraint_level}" if constraint_level != "loose" else base_prompt_name
     
     # Load model
     tokenizer, model = load_model(device=device, quantize=quantize)

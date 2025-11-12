@@ -4,7 +4,6 @@ SmileyLlama inference with property evaluation.
 from __future__ import annotations
 
 import argparse
-import math
 import random
 from pathlib import Path
 from typing import Iterable, List, Optional

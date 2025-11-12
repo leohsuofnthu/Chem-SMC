@@ -30,8 +30,8 @@ if [ ! -f "$PROPERTY_RANGES" ]; then
     exit 1
 fi
 
-# 1. GPT2-Zinc Baseline (multi-prefix, constraint-filtered)
-echo "[1/2] Running GPT2-Zinc baseline with multi-prefix constraint filtering..."
+# 1. GPT2-Zinc Baseline (multi-prefix, constraint evaluation)
+echo "[1/2] Running GPT2-Zinc baseline with multi-prefix constraint evaluation..."
 for level in "${CONSTRAINT_LEVELS[@]}"; do
     echo "  - Constraint level: $level"
     python -m src.baseline_generate_constraint \

@@ -41,7 +41,7 @@ from .utils import (
 )
 
 try:
-    from genlm.control import AWRS, PromptedLLM, BoolFSA, Potential
+    from genlm.control import AWRS, PromptedLLM, Potential
     GENLM_AVAILABLE = True
 except ImportError:
     GENLM_AVAILABLE = False
@@ -143,42 +143,8 @@ class ConstraintBasedMolecularConstraint:
 
 
 # ============================================================
-# Token decoding & SMILES sanitization
+# SMILES sanitization
 # ============================================================
-
-def detok(text: str) -> str:
-    """ChemGPT-specific cleanup; harmless if used on GPT2-ZINC."""
-    t = text.replace(" ", "")
-    replacements = {
-        "[NH3+expl]": "N", "[NH+expl]": "N", "[NHexpl]": "N",
-        "[O-expl]": "O", "[OExpl]": "O", "[P]": "P", "[S]": "S",
-        "[F]": "F", "[Cl]": "Cl", "[Br]": "Br", "[I]": "I",
-        "[#N]": "N", "[#C]": "C",
-    }
-    for k, v in replacements.items():
-        t = t.replace(k, v)
-    for token in [
-        "[Branch1_1]", "[Branch1_2]", "[Branch1_3]",
-        "[Branch2_1]", "[Branch2_2]", "[Branch2_3]",
-        "[Ring1]", "[Ring2]", "[Ring3]",
-        "[Expl=Ring1]", "[Expl=Ring2]", "[Expl=Ring3]",
-    ]:
-        t = t.replace(token, "")
-    t = (t.replace("+expl", "").replace("-expl", "")
-           .replace("expl", "").replace("[", "").replace("]", ""))
-    return t.strip()
-
-
-def sanitize_smiles(s: str) -> Optional[str]:
-    """Return canonical SMILES or None if invalid."""
-    try:
-        mol = Chem.MolFromSmiles(s)
-        if mol is None:
-            return None
-        return Chem.MolToSmiles(mol, canonical=True)
-    except Exception:
-        return None
-
 
 def _extract_partial_smiles(text: str) -> str:
     """Extract the longest potential SMILES substring from text."""
@@ -290,17 +256,6 @@ class SMILESConstraintPotential(Potential):
     
     async def batch_complete(self, contexts):
         return [await self.complete(ctx) for ctx in contexts]
-
-
-def _make_smiles_constraint():
-    """Create SMILES regex constraint using GenLM's BoolFSA."""
-    smiles_pattern = r"[A-Za-z0-9@+\-\[\]\(\)=#\\/]"
-    try:
-        smiles_fsa = BoolFSA.from_regex(smiles_pattern)
-        return smiles_fsa
-    except Exception as e:
-        print(f"Warning: SMILES constraint creation failed ({e})")
-        return None
 
 
 # ============================================================

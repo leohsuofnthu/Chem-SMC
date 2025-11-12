@@ -64,6 +64,11 @@ def _valid_df(df: pd.DataFrame) -> pd.DataFrame:
 def tanimoto_diversity(smiles: Iterable[str]) -> float:
     fps: List[DataStructs.ExplicitBitVect] = []
     for s in smiles:
+        # Filter out NaN and non-string values (pandas Series can contain NaN as float)
+        if not isinstance(s, str):
+            continue
+        if pd.isna(s):
+            continue
         mol = Chem.MolFromSmiles(s)
         if mol is None:
             continue

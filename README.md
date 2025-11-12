@@ -2,7 +2,7 @@
 
 Two complementary strategies for controlled molecule generation:
 
-1. **GPT2-Zinc-87M Baseline** with multi-prefix sampling and constraint filtering  
+1. **GPT2-Zinc-87M Baseline** with multi-prefix sampling and constraint evaluation  
 2. **SmileyLlama-8B** instruction following with prompt-based constraints
 
 Both approaches are evaluated using constraint-based metrics: Adherence %, Valid %, Distinct %, and Diversity.

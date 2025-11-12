@@ -36,7 +36,7 @@ def test_imports():
         
         # Test GenLM availability
         try:
-            from genlm.control import AWRS, PromptedLLM, BoolFSA, Potential
+            from genlm.control import AWRS, PromptedLLM, Potential
             print("[OK] GenLM Control library available")
             genlm_available = True
         except ImportError:

@@ -26,8 +26,8 @@ if (-not (Test-Path $PropertyRanges)) {
     exit 1
 }
 
-# 1. GPT2-Zinc Baseline (multi-prefix, constraint-filtered)
-Write-Host "[1/2] Running GPT2-Zinc baseline with multi-prefix constraint filtering..." -ForegroundColor Green
+# 1. GPT2-Zinc Baseline (multi-prefix, constraint evaluation)
+Write-Host "[1/2] Running GPT2-Zinc baseline with multi-prefix constraint evaluation..." -ForegroundColor Green
 foreach ($level in $ConstraintLevels) {
     Write-Host "  - Constraint level: $level" -ForegroundColor Yellow
     python -m src.baseline_generate_constraint `

@@ -293,13 +293,6 @@ def save_property_ranges(
         
         output_dict[dataset_name] = dataset_ranges
     
-    # Also save a flat structure for backward compatibility (just loose ranges)
-    ranges_dict_flat = {
-        "ZINC": output_dict["ZINC"]["loose"],
-        "ChEMBL": output_dict["ChEMBL"]["loose"],
-        "Combined": output_dict["Combined"]["loose"],
-    }
-    
     # Save the full structure with all constraint levels
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output_dict, f, indent=2)
@@ -315,12 +308,6 @@ def save_property_ranges(
             ranges = output_dict[dataset_name][level_name]
             for prop, (low, high) in ranges.items():
                 print(f"    {prop:>4s}: {low:>8.2f} - {high:>8.2f}")
-    
-    # Also save flat version for backward compatibility
-    flat_output_path = output_path.parent / f"{output_path.stem}_flat.json"
-    with open(flat_output_path, "w", encoding="utf-8") as f:
-        json.dump(ranges_dict_flat, f, indent=2)
-    print(f"\nAlso saved flat structure (loose only) to {flat_output_path} for backward compatibility")
 
 
 def main() -> None:

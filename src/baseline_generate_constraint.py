@@ -1,6 +1,6 @@
 """
 Constraint-aware baseline generation with GPT2-Zinc.
-Samples from all available prefixes and filters by constraint adherence.
+Samples from all available prefixes and evaluates constraint adherence.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def _decode_generations(
 
 def generate_with_multi_prefix(
     prefix_prompts: List[str],
-    constraint_spec: Optional[object] = None,  # PromptSpec with constraints
+    constraint_spec: Optional[object] = None,  # PromptSpec with constraints for evaluation
     n: int = 1_000,
     T: float = 1.0,
     top_p: float = 0.9,
@@ -74,16 +74,16 @@ def generate_with_multi_prefix(
     batch_size: int = 64,
     device: Optional[str] = None,
     seed: int = 42,
-    filter_by_constraints: bool = True,
+    filter_by_constraints: bool = False,  # Changed default to False for fair evaluation
 ) -> pd.DataFrame:
     """
     Generate molecules by sampling from multiple prefixes randomly.
     
     Args:
         prefix_prompts: List of prefix strings to sample from
-        constraint_spec: PromptSpec with constraints for filtering (optional)
+        constraint_spec: PromptSpec with constraints for evaluation (optional)
         n: Target number of molecules to generate
-        filter_by_constraints: If True, only keep molecules meeting constraints
+        filter_by_constraints: If True, only keep molecules meeting constraints (for filtering mode)
         ... other args same as before
     """
     set_seed(seed)
@@ -94,8 +94,8 @@ def generate_with_multi_prefix(
     outputs: List[str] = []
     prefix_used: List[str] = []  # Track which prefix was used for each output
     
-    # Generate more if we're filtering (expect ~30-50% to pass constraints)
-    target_generate = n * 3 if filter_by_constraints else n
+    # Generate exactly n molecules (no filtering means we generate what we need)
+    target_generate = n
     
     # Create progress bar
     pbar = tqdm(
@@ -130,40 +130,26 @@ def generate_with_multi_prefix(
                 outputs.append(text)
                 prefix_used.append(prefix)
             
-            # If filtering, check adherence periodically and update progress
-            if filter_by_constraints and constraint_spec and len(outputs) >= batch_size:
-                # Check every batch_size molecules
-                temp_df = compute_properties_df(outputs)
-                temp_df = annotate_adherence(temp_df, constraint_spec)
-                valid_count = temp_df["Adherence"].sum() if "Adherence" in temp_df.columns else 0
-                pbar.n = min(valid_count, n)
-                pbar.refresh()
-                pbar.set_postfix({
-                    "Valid": f"{valid_count}",
-                    "Generated": f"{len(outputs)}",
-                    "Temp": f"{T:.1f}"
-                })
-                
-                # Break early if we have enough valid molecules
-                if valid_count >= n:
-                    break
-            else:
-                pbar.update(len(decoded))
-                pbar.set_postfix({
-                    "Generated": f"{len(outputs)}",
-                    "Temp": f"{T:.1f}"
-                })
+            # Update progress
+            pbar.update(len(decoded))
+            pbar.set_postfix({
+                "Generated": f"{len(outputs)}/{target_generate}",
+                "Temp": f"{T:.1f}"
+            })
     
     finally:
         pbar.close()
 
-    # Compute properties and filter
-    df = compute_properties_df(outputs)
+    # Compute properties and evaluate adherence (but don't filter)
+    df = compute_properties_df(outputs[:n])  # Take exactly n molecules
     df["Prefix"] = prefix_used[:len(df)]
     
-    # Filter by constraints if requested
-    if filter_by_constraints and constraint_spec:
+    # Always annotate adherence for evaluation, but only filter if explicitly requested
+    if constraint_spec:
         df = annotate_adherence(df, constraint_spec)
+    
+    # Only filter if explicitly requested (for backward compatibility)
+    if filter_by_constraints and constraint_spec:
         # Keep only molecules meeting constraints
         df = df[df["Adherence"] == True].head(n).copy()
         if len(df) < n:
@@ -192,6 +178,7 @@ def run_constraint_experiment(
 ) -> pd.DataFrame:
     """
     Run a single constraint-level experiment using all available prefixes.
+    Evaluates adherence without filtering for fair comparison with other methods.
     """
     start_time = time.time()
     
@@ -212,7 +199,7 @@ def run_constraint_experiment(
     # Get all prefix texts
     all_prefixes = [p.text for p in GPT_ZINC_PROMPTS]
     
-    # Generate with multi-prefix
+    # Generate with multi-prefix (without filtering for fair evaluation)
     df = generate_with_multi_prefix(
         prefix_prompts=all_prefixes,
         constraint_spec=constraint_spec,
@@ -223,7 +210,7 @@ def run_constraint_experiment(
         batch_size=batch_size,
         device=device,
         seed=seed,
-        filter_by_constraints=True,
+        filter_by_constraints=False,  # Changed to False for fair evaluation
     )
     
     # Add metadata
