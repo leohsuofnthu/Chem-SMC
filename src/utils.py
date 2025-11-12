@@ -493,12 +493,14 @@ def create_constraint_variant(
     Returns:
         New PromptSpec with modified constraints
     """
-    # Create new constraints dict, using ranges for properties that exist in constraint_ranges
+    # Create new constraints dict, using EXACT ranges for properties that exist in constraint_ranges
+    # NOTE: These exact constraints are used for evaluation (both SmileyLlama and SMC)
+    # The prompt text below is separate and only affects SmileyLlama's generation, not evaluation
     new_constraints = {}
     
     for prop, (lower, upper) in base_prompt.constraints.items():
         if prop in constraint_ranges:
-            # Use the new range
+            # Use the EXACT range from constraint_ranges for fair evaluation across all models
             new_constraints[prop] = constraint_ranges[prop]
         else:
             # Keep original constraint
@@ -508,100 +510,191 @@ def create_constraint_variant(
     new_name = f"{base_prompt.name}_{tightness}"
     
     # Update prompt text for instruction-style prompts (SMILEY)
-    # Use regex to properly replace constraint values in the prompt text
+    # IMPORTANT: SmileyLlama was trained on upper-bound format (<= X), not range format (X-Y)
+    # Convert ranges to upper-bound format to match training distribution
+    # NOTE: This prompt text is ONLY for SmileyLlama generation - evaluation uses new_constraints above
     new_text = base_prompt.text
     if any(prop in constraint_ranges for prop in ["MW", "logP", "RotB", "QED"]):
-        # Update molecular weight - match patterns like "molecular weight 300-400" or "MW 300-400"
+        # Update molecular weight - use both lower and upper bounds when available
+        # Training format: <= 300, <= 400, <= 500, <= 600, > 600
         if "MW" in constraint_ranges:
             mw_min, mw_max = constraint_ranges["MW"]
+            # Round to nearest training category: 300, 400, 500, 600, or use exact value
+            mw_upper = mw_max
+            if mw_max <= 300:
+                mw_upper = 300
+            elif mw_max <= 400:
+                mw_upper = 400
+            elif mw_max <= 500:
+                mw_upper = 500
+            elif mw_max <= 600:
+                mw_upper = 600
+            else:
+                mw_upper = int(mw_max)  # Use exact value for > 600
+            
             if "molecular weight" in base_prompt.text.lower():
-                # Replace "molecular weight 300-400" pattern
-                new_text = re.sub(
-                    r'molecular weight\s+\d+-\d+',
-                    f'molecular weight {mw_min:.0f}-{mw_max:.0f}',
-                    new_text,
-                    flags=re.IGNORECASE
-                )
+                # If we have both min and max, use ">= X and <= Y" format
+                if mw_min is not None and mw_max is not None:
+                    mw_lower = int(mw_min)
+                    new_text = re.sub(
+                        r'molecular weight\s+[\d.]+-[\d.]+',
+                        f'>= {mw_lower} and <= {mw_upper:.0f} molecular weight',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                    new_text = re.sub(
+                        r'<=\s*\d+\s+molecular weight',
+                        f'>= {mw_lower} and <= {mw_upper:.0f} molecular weight',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                else:
+                    # Only upper bound - use upper-bound format
+                    new_text = re.sub(
+                        r'molecular weight\s+[\d.]+-[\d.]+',
+                        f'<= {mw_upper:.0f} molecular weight',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                    new_text = re.sub(
+                        r'<=\s*\d+\s+molecular weight',
+                        f'<= {mw_upper:.0f} molecular weight',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
             elif "MW" in base_prompt.text:
-                # Replace "MW 300-400" pattern (if MW appears as abbreviation)
-                new_text = re.sub(
-                    r'MW\s+\d+-\d+',
-                    f'MW {mw_min:.0f}-{mw_max:.0f}',
-                    new_text
-                )
+                # If we have both min and max, use ">= X and <= Y" format
+                if mw_min is not None and mw_max is not None:
+                    mw_lower = int(mw_min)
+                    new_text = re.sub(
+                        r'MW\s+[\d.]+-[\d.]+',
+                        f'>= {mw_lower} and <= {mw_upper:.0f} MW',
+                        new_text
+                    )
+                else:
+                    # Only upper bound
+                    new_text = re.sub(
+                        r'MW\s+[\d.]+-[\d.]+',
+                        f'<= {mw_upper:.0f} MW',
+                        new_text
+                    )
         
-        # Update logP - match patterns like "logP 2-4" or "logP 2.0-4.0"
+        # Update logP - use both lower and upper bounds when available
+        # Training format: <= 3, <= 4, <= 5, <= 10, <= 15, > 15
         if "logP" in constraint_ranges:
             logp_min, logp_max = constraint_ranges["logP"]
+            # Round to nearest training category: 3, 4, 5, 10, 15, or use exact value
+            logp_upper = logp_max
+            if logp_max <= 3:
+                logp_upper = 3
+            elif logp_max <= 4:
+                logp_upper = 4
+            elif logp_max <= 5:
+                logp_upper = 5
+            elif logp_max <= 10:
+                logp_upper = 10
+            elif logp_max <= 15:
+                logp_upper = 15
+            else:
+                logp_upper = int(logp_max)  # Use exact value for > 15
+            
             if "logp" in base_prompt.text.lower():
-                # Replace "logP 2-4" or "logP 2.0-4.0" patterns
-                new_text = re.sub(
-                    r'logP\s+[\d.]+-[\d.]+',
-                    f'logP {logp_min:.1f}-{logp_max:.1f}',
-                    new_text,
-                    flags=re.IGNORECASE
-                )
+                # If we have both min and max, use ">= X and <= Y" format
+                if logp_min is not None and logp_max is not None:
+                    logp_lower = logp_min if logp_min >= 0 else int(logp_min)
+                    new_text = re.sub(
+                        r'logP\s+[\d.]+-[\d.]+',
+                        f'>= {logp_lower:.1f} and <= {logp_upper:.0f} logP',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                    new_text = re.sub(
+                        r'<=\s*[\d.]+\s+logP',
+                        f'>= {logp_lower:.1f} and <= {logp_upper:.0f} logP',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                else:
+                    # Only upper bound - use upper-bound format
+                    new_text = re.sub(
+                        r'logP\s+[\d.]+-[\d.]+',
+                        f'<= {logp_upper:.0f} logP',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                    new_text = re.sub(
+                        r'<=\s*[\d.]+\s+logP',
+                        f'<= {logp_upper:.0f} logP',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
         
-        # Update rotatable bonds - match patterns like "<= 7 rotatable bonds"
+        # Update rotatable bonds - use both lower and upper bounds when available
+        # Training format: <= 7, <= 10, > 10 (upper bounds) or >= X and <= Y (ranges)
         if "RotB" in constraint_ranges:
             rotb_min, rotb_max = constraint_ranges["RotB"]
             if "rotatable" in base_prompt.text.lower():
-                # Check if text has both min and max, or just one bound
-                has_min_pattern = bool(re.search(r'>=\s*\d+\s+rotatable bonds', new_text, re.IGNORECASE))
-                has_max_pattern = bool(re.search(r'<=\s*\d+\s+rotatable bonds', new_text, re.IGNORECASE))
+                # Round to nearest training category: 7, 10, or use exact value
+                rotb_upper = rotb_max
+                if rotb_max <= 7:
+                    rotb_upper = 7
+                elif rotb_max <= 10:
+                    rotb_upper = 10
+                else:
+                    rotb_upper = int(rotb_max)  # Use exact value for > 10
                 
+                # If we have both min and max, use ">= X and <= Y" format
                 if rotb_min is not None and rotb_min > 0 and rotb_max is not None:
-                    # We have both min and max constraints
-                    if has_min_pattern and has_max_pattern:
-                        # Replace both patterns
-                        new_text = re.sub(
-                            r'>=\s*\d+\s+rotatable bonds',
-                            f'>= {rotb_min:.0f} rotatable bonds',
-                            new_text,
-                            flags=re.IGNORECASE
-                        )
-                        new_text = re.sub(
-                            r'<=\s*\d+\s+rotatable bonds',
-                            f'<= {rotb_max:.0f} rotatable bonds',
-                            new_text,
-                            flags=re.IGNORECASE
-                        )
-                    elif has_max_pattern and not has_min_pattern:
-                        # Only upper bound in text, but we need both - convert to range format
-                        new_text = re.sub(
-                            r'<=\s*\d+\s+rotatable bonds',
-                            f'{rotb_min:.0f}-{rotb_max:.0f} rotatable bonds',
-                            new_text,
-                            flags=re.IGNORECASE
-                        )
-                    elif has_min_pattern and not has_max_pattern:
-                        # Only lower bound in text, but we need both - add upper bound
-                        new_text = re.sub(
-                            r'>=\s*\d+\s+rotatable bonds',
-                            f'{rotb_min:.0f}-{rotb_max:.0f} rotatable bonds',
-                            new_text,
-                            flags=re.IGNORECASE
-                        )
-                elif rotb_max is not None:
-                    # Only upper bound constraint
+                    rotb_lower = int(rotb_min)
+                    # Replace any format with both bounds
+                    new_text = re.sub(
+                        r'\d+-\d+\s+rotatable bonds',
+                        f'>= {rotb_lower} and <= {rotb_upper:.0f} rotatable bonds',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
                     new_text = re.sub(
                         r'<=\s*\d+\s+rotatable bonds',
-                        f'<= {rotb_max:.0f} rotatable bonds',
+                        f'>= {rotb_lower} and <= {rotb_upper:.0f} rotatable bonds',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                    new_text = re.sub(
+                        r'>=\s*\d+\s+rotatable bonds',
+                        f'>= {rotb_lower} and <= {rotb_upper:.0f} rotatable bonds',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                elif rotb_max is not None:
+                    # Only upper bound - use upper-bound format
+                    new_text = re.sub(
+                        r'\d+-\d+\s+rotatable bonds',
+                        f'<= {rotb_upper:.0f} rotatable bonds',
+                        new_text,
+                        flags=re.IGNORECASE
+                    )
+                    new_text = re.sub(
+                        r'<=\s*\d+\s+rotatable bonds',
+                        f'<= {rotb_upper:.0f} rotatable bonds',
                         new_text,
                         flags=re.IGNORECASE
                     )
                 elif rotb_min is not None and rotb_min > 0:
-                    # Only lower bound constraint
+                    # Only lower bound - use lower-bound format (like Fraction sp3: > 0.4)
+                    rotb_lower = int(rotb_min)
                     new_text = re.sub(
                         r'>=\s*\d+\s+rotatable bonds',
-                        f'>= {rotb_min:.0f} rotatable bonds',
+                        f'> {rotb_lower} rotatable bonds',
                         new_text,
                         flags=re.IGNORECASE
                     )
     
+    # Return PromptSpec with:
+    # - text: Upper-bound or range format (>= X and <= Y) for SmileyLlama prompt (generation only)
+    # - constraints: Exact ranges for evaluation (both SmileyLlama and SMC)
     return PromptSpec(
         name=new_name,
-        text=new_text,
-        constraints=new_constraints,
+        text=new_text,  # Used for SmileyLlama generation (>= X and <= Y or <= X format)
+        constraints=new_constraints,  # Used for evaluation (exact ranges, fair for all models)
     )
 

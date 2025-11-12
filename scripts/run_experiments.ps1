@@ -58,10 +58,10 @@ foreach ($level in $ConstraintLevels) {
         --n $N `
         --particles 50 `
         --ess-threshold 0.3 `
-        --temperature 0.7 `
+        --temperature 1.0 `
         --top_p 0.9 `
-        --max-new-tokens 60 `
-        --top-k 30 `
+        --max-new-tokens 128 `
+        --top-k 50000 `
         --out-csv "results/smc_${level}_results.csv" `
         --summary-csv "results/smc_${level}_summary.csv"
 }
@@ -84,6 +84,7 @@ foreach ($level in $ConstraintLevels) {
         --temperature 1.0 `
         --top_p 0.9 `
         --batch_size 128 `
+        --seed 42 `
         --quantize `
         --out-csv "results/smiley_${level}_results.csv" `
         --summary-csv "results/smiley_${level}_summary.csv"

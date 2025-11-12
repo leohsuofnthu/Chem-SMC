@@ -1,6 +1,6 @@
-Model,Temperature,Prompt,Adherence %,Valid %,Distinct %,Diversity
-GPT2-Zinc-87M,1.0,multi_prefix,100.0,100.0,77.78541953232462,0.8637599356135607
-GPT2-Zinc-87M+SMC,0.7,multi_prefix_smc,29.550102249488752,100.0,99.2842535787321,0.8879507310110737
-SmileyLlama-8B,1.0,mw_logp_rotb,16.900000000000002,100.0,100.0,0.8695460282511089
-SmileyLlama-8B,1.0,mw_logp_rotb_tight,16.1,100.0,100.0,0.871993296656441
-SmileyLlama-8B,1.0,mw_logp_rotb_ultra_tight,1.3,100.0,100.0,0.8649603126395012
+Model,Prompt,Adherence %,Valid %,Distinct %,Diversity
+GPT2-Zinc-87M,multi_prefix,22.466666666666665,69.1,20.133333333333333,0.8738989016354528
+GPT2-Zinc-87M+SMC,multi_prefix_smc,30.3422756706753,100.0,99.90749306197965,0.8944292333900219
+SmileyLlama-8B,mw_logp_rotb,71.8,100.0,100.0,0.8721735879780451
+SmileyLlama-8B,mw_logp_rotb_tight,2.1999999999999997,100.0,100.0,0.8584681783650345
+SmileyLlama-8B,mw_logp_rotb_ultra_tight,0.0,100.0,100.0,0.8569576282012026
