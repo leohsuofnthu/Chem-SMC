@@ -54,6 +54,15 @@ try:
     GENLM_AVAILABLE = True
 except ImportError:
     GENLM_AVAILABLE = False
+    # Create dummy classes to allow module import even when genlm is not available
+    class Potential:
+        """Dummy Potential class when genlm-control is not available."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "genlm-control is required for SMC generation. Install with `pip install genlm-control`."
+            )
+    AWRS = None
+    PromptedLLM = None
 
 DEFAULT_MODEL_NAME = "entropy/gpt2_zinc_87M"
 

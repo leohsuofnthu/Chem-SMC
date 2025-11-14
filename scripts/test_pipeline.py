@@ -16,12 +16,16 @@ def test_imports():
     print("=" * 60)
     
     try:
-        from src import analyze_train_data, baseline_generate_constraint, smiley_generate_constraint, evaluate, plots, utils
+        # Import modules directly to avoid lazy loading recursion
+        from src import evaluate, plots, utils
+        import src.analyze_train_data as analyze_train_data
+        import src.baseline_generate_constraint as baseline_generate_constraint
+        import src.smiley_generate_constraint as smiley_generate_constraint
         print("[OK] All core modules imported successfully")
         
         # Test SMC module (optional - requires genlm-control)
         try:
-            from src import smc_generate_constraint
+            import src.smc_generate_constraint as smc_generate_constraint
             print("[OK] SMC module imported successfully")
             smc_available = True
         except ImportError as e:
@@ -84,9 +88,9 @@ def test_baseline_generation(n=10):
     try:
         from src.baseline_generate_constraint import run_constraint_experiment
         
-        print(f"  Running with n={n} molecules, constraint_level='loosen' (gradual constraints)...")
+        print(f"  Running with n={n} molecules, constraint_level='loose' (range-based constraints)...")
         df = run_constraint_experiment(
-            constraint_level="loosen",
+            constraint_level="loose",
             property_ranges_path="data/train_property_ranges.json",
             dataset="Combined",
             n=n,
@@ -213,23 +217,24 @@ def test_evaluation():
     
     try:
         import pandas as pd
-        from src.evaluate import _load_results, build_tables
+        from src.evaluate import build_tables
+        from src.utils import load_results_file
         
         dfs_to_combine = []
         
-        baseline = _load_results(str(baseline_path))
+        baseline = load_results_file(str(baseline_path))
         print(f"[OK] Loaded baseline results: {len(baseline)} molecules")
         dfs_to_combine.append(baseline)
         
         # Try to load SMC if available
         if smc_path.exists():
-            smc = _load_results(str(smc_path))
+            smc = load_results_file(str(smc_path))
             print(f"[OK] Loaded SMC results: {len(smc)} molecules")
             dfs_to_combine.append(smc)
         
         # Try to load smiley if available
         if smiley_path.exists():
-            smiley = _load_results(str(smiley_path))
+            smiley = load_results_file(str(smiley_path))
             print(f"[OK] Loaded SmileyLlama results: {len(smiley)} molecules")
             dfs_to_combine.append(smiley)
         

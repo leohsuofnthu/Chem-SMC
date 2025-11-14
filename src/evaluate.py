@@ -16,13 +16,18 @@ import pandas as pd
 
 # Conditional rdkit import for test compatibility
 try:
+    from rdkit import Chem
     from rdkit.Chem import AllChem, DataStructs
     from rdkit import RDLogger
     RDKIT_AVAILABLE = True
+    # Suppress RDKit SMILES parse error messages
+    RDLogger.DisableLog("rdApp.*")
 except ImportError:
     RDKIT_AVAILABLE = False
+    Chem = None
     AllChem = None
     DataStructs = None
+    RDLogger = None
 
 from .utils import (
     ensure_directory,
@@ -33,11 +38,13 @@ from .utils import (
     count_result_files,
 )
 
-# Suppress RDKit SMILES parse error messages
-RDLogger.DisableLog("rdApp.*")
-
 
 def tanimoto_diversity(smiles: Iterable[str]) -> float:
+    """Calculate Tanimoto diversity (1 - mean similarity) for SMILES strings."""
+    if not RDKIT_AVAILABLE:
+        # Return 0.0 if rdkit is not available (can't calculate diversity)
+        return 0.0
+    
     fps: List[DataStructs.ExplicitBitVect] = []
     for s in smiles:
         # Filter out NaN and non-string values (pandas Series can contain NaN as float)
