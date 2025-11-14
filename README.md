@@ -2,9 +2,9 @@
 
 Three strategies for controlled molecule generation:
 
-1. **GPT2-Zinc-87M Baseline** with multi-prefix sampling and constraint evaluation (range-based constraints)
+1. **[GPT2-Zinc-87M](https://huggingface.co/entropy/gpt2_zinc_87m) Baseline** with multi-prefix sampling and constraint evaluation (range-based constraints)
 2. **GPT2-Zinc+SMC** with SMC-guided generation using gradual constraints  
-3. **SmileyLlama-8B** instruction following with gradual constraints
+3. **[SmileyLlama-8B](https://huggingface.co/THGLab/Llama-3.1-8B-SmileyLlama-1.1)** instruction following with gradual constraints
 
 All approaches are evaluated using constraint-based metrics: Adherence %, Valid %, Distinct %, and Diversity.
 
