@@ -170,7 +170,7 @@ def run_constraint_experiment(
     temperature: float = 1.0,
     top_p: float = 0.9,
     max_new_tokens: int = 128,
-    batch_size: int = 64,
+    batch_size: int = 256,
     device: Optional[str] = None,
     seed: int = 42,
     out_csv: str = "results/baseline_results.csv",
@@ -261,7 +261,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--max_new_tokens", type=int, default=128)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-csv", type=str, default="results/baseline_results.csv")

@@ -3,6 +3,7 @@ Shared utility functions for molecule generation experiments.
 """
 from __future__ import annotations
 
+import glob
 import json
 import re
 from dataclasses import dataclass
@@ -11,12 +12,25 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from rdkit import Chem
-from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
-from rdkit import RDLogger
 
-# Suppress RDKit SMILES parse error messages
-RDLogger.DisableLog("rdApp.*")
+# Conditional rdkit import for test compatibility
+try:
+    from rdkit import Chem
+    from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
+    from rdkit import RDLogger
+    # Suppress RDKit SMILES parse error messages
+    RDLogger.DisableLog("rdApp.*")
+    RDKIT_AVAILABLE = True
+except ImportError:
+    RDKIT_AVAILABLE = False
+    # Create dummy objects for type checking
+    Chem = None
+    Crippen = None
+    Descriptors = None
+    Lipinski = None
+    QED = None
+    rdMolDescriptors = None
+    RDLogger = None
 
 
 @dataclass(frozen=True)
@@ -230,23 +244,34 @@ GPT_ZINC_PROMPTS: List[PromptSpec] = [
 SMILEY_PROMPT_MAP = {p.name: p for p in SMILEY_PROMPTS}
 GPT_ZINC_PROMPT_MAP = {p.name: p for p in GPT_ZINC_PROMPTS}
 
-PROPERTY_FNS = {
-    "MW": Descriptors.MolWt,
-    "logP": Crippen.MolLogP,
-    "RotB": Lipinski.NumRotatableBonds,
-    "HBD": Lipinski.NumHDonors,
-    "HBA": Lipinski.NumHAcceptors,
-    "TPSA": Descriptors.TPSA,
-    "QED": QED.qed,
-    "Fsp3": rdMolDescriptors.CalcFractionCSP3,
-}
+# Property computation mapping (conditional on rdkit availability)
+if RDKIT_AVAILABLE:
+    PROPERTY_FNS = {
+        "MW": Descriptors.MolWt,
+        "logP": Crippen.MolLogP,
+        "RotB": Lipinski.NumRotatableBonds,
+        "HBD": Lipinski.NumHDonors,
+        "HBA": Lipinski.NumHAcceptors,
+        "TPSA": Descriptors.TPSA,
+        "QED": QED.qed,
+        "Fsp3": rdMolDescriptors.CalcFractionCSP3,
+    }
+else:
+    # Dummy mapping when rdkit is not available
+    PROPERTY_FNS = {}
 
 PROPERTY_COLUMNS = ["MW", "logP", "RotB", "HBD", "HBA", "TPSA", "QED"]
 
 SMILES_PATTERN = re.compile(r"[A-Za-z0-9@+\-\[\]\(\)=#\\/]+")
 
+# Constraint level mapping for backward compatibility
+CONSTRAINT_LEVEL_MAP = {"loose": "loosen", "tight": "tight", "ultra_tight": "ultra_tight"}
+
 
 def canonicalize_smiles(smiles: str) -> Optional[str]:
+    """Canonicalize SMILES string. Returns None if rdkit is not available or SMILES is invalid."""
+    if not RDKIT_AVAILABLE:
+        return None
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
@@ -254,15 +279,48 @@ def canonicalize_smiles(smiles: str) -> Optional[str]:
 
 
 def compute_properties(smiles: str) -> Optional[Dict[str, float]]:
+    """Compute molecular properties. Returns None if rdkit is not available or SMILES is invalid."""
+    if not RDKIT_AVAILABLE:
+        return None
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
     return {name: fn(mol) for name, fn in PROPERTY_FNS.items()}
 
 
-def compute_properties_df(smiles_list: Iterable[str]) -> pd.DataFrame:
+def compute_properties_df(smiles_list: Iterable[str], show_progress: bool = False, desc: str = "Computing properties") -> pd.DataFrame:
+    """
+    Compute molecular properties for a list of SMILES strings.
+    
+    Args:
+        smiles_list: Iterable of SMILES strings
+        show_progress: If True, show progress bar (requires tqdm)
+        desc: Description for progress bar
+    
+    Returns:
+        DataFrame with SMILES, Valid flag, and computed properties
+    """
     records = []
-    for s in smiles_list:
+    iterator = smiles_list
+    
+    if show_progress:
+        try:
+            from tqdm import tqdm
+            iterator = tqdm(smiles_list, desc=desc, unit=" mols", ncols=80)
+        except ImportError:
+            iterator = smiles_list
+    
+    for s in iterator:
+        if not RDKIT_AVAILABLE:
+            records.append(
+                {
+                    "SMILES": s,
+                    "Valid": False,
+                    **{k: np.nan for k in PROPERTY_COLUMNS},
+                    "Fsp3": np.nan,
+                }
+            )
+            continue
         mol = Chem.MolFromSmiles(s)
         if mol is None:
             records.append(
@@ -329,6 +387,250 @@ def ensure_directory(path: str) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
+def seed_all(seed: int) -> None:
+    """
+    Set random seeds for reproducibility across all random number generators.
+    
+    Args:
+        seed: Random seed value
+    """
+    import random
+    import numpy as np
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except ImportError:
+        pass  # torch not available
+    random.seed(seed)
+    np.random.seed(seed)
+
+
+# ============================================================
+# Shared file loading utilities (consolidated from evaluate.py and plots.py)
+# ============================================================
+
+def load_results_file(path: str, temperature: Optional[float] = None) -> pd.DataFrame:
+    """
+    Load a single results CSV file with optional temperature filtering.
+    
+    Args:
+        path: Path to CSV file
+        temperature: Optional temperature value to filter by
+    
+    Returns:
+        DataFrame with results
+    """
+    df = pd.read_csv(path)
+    if temperature is not None and "Temperature" in df.columns:
+        df = df[np.isclose(df["Temperature"], temperature)]
+    if "Valid" not in df.columns:
+        if RDKIT_AVAILABLE:
+            df["Valid"] = df["SMILES"].apply(lambda s: Chem.MolFromSmiles(s) is not None)
+        else:
+            df["Valid"] = False
+    return df
+
+
+def load_results_by_pattern(pattern: str, temperature: Optional[float] = None) -> pd.DataFrame:
+    """
+    Load all results files matching a glob pattern and combine them.
+    
+    Args:
+        pattern: Glob pattern to match result files (e.g., 'results/baseline_*_results.csv')
+        temperature: Optional temperature filter
+    
+    Returns:
+        Combined DataFrame, or empty DataFrame if no files found.
+    """
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return pd.DataFrame()
+    
+    dfs = []
+    for f in files:
+        df = load_results_file(f, temperature)
+        dfs.append(df)
+    
+    if not dfs:
+        return pd.DataFrame()
+    
+    return pd.concat(dfs, ignore_index=True)
+
+
+def filter_valid_molecules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Filter DataFrame to only include valid molecules.
+    
+    Args:
+        df: DataFrame with 'Valid' column
+    
+    Returns:
+        Filtered DataFrame with only valid molecules
+    """
+    return df[df["Valid"]].copy() if "Valid" in df.columns else df
+
+
+def load_experiment_results(
+    results_dir: str = "results",
+    baseline: Optional[str] = None,
+    smc: Optional[str] = None,
+    smiley: Optional[str] = None,
+    temperature: Optional[float] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Load experiment results for baseline, SMC, and SmileyLlama models.
+    Handles auto-detection of combined vs individual files, and gradual vs range-based results.
+    
+    Args:
+        results_dir: Directory containing result files
+        baseline: Optional baseline results file or pattern (None = auto-detect)
+        smc: Optional SMC results file or pattern (None = auto-detect)
+        smiley: Optional SmileyLlama results file or pattern (None = auto-detect)
+        temperature: Optional temperature filter
+    
+    Returns:
+        Tuple of (baseline_df, smc_gradual_df, smc_range_df, smiley_gradual_df, smiley_range_df, smc_combined_df, smiley_combined_df)
+        Note: smc_combined_df and smiley_combined_df are for backward compatibility
+    """
+    # Load baseline
+    if baseline is None:
+        baseline_combined = Path(results_dir) / "baseline_results.csv"
+        if baseline_combined.exists():
+            baseline_df = load_results_file(str(baseline_combined), temperature)
+        else:
+            baseline_df = load_results_by_pattern(f"{results_dir}/baseline_*_results.csv", temperature)
+    else:
+        if "*" in baseline:
+            baseline_df = load_results_by_pattern(baseline, temperature)
+        else:
+            baseline_df = load_results_file(baseline, temperature)
+    
+    # Load SMC results (distinguish gradual vs range-based)
+    smc_gradual_df = pd.DataFrame()
+    smc_range_df = pd.DataFrame()
+    smc_combined_df = pd.DataFrame()
+    
+    if smc is None:
+        smc_all = Path(results_dir) / "smc_all_results.csv"
+        smc_gradual = Path(results_dir) / "smc_gradual_results.csv"
+        smc_range = Path(results_dir) / "smc_range_results.csv"
+        if smc_all.exists():
+            smc_combined_df = load_results_file(str(smc_all), temperature)
+        elif smc_gradual.exists() or smc_range.exists():
+            if smc_gradual.exists():
+                smc_gradual_df = load_results_file(str(smc_gradual), temperature)
+            if smc_range.exists():
+                smc_range_df = load_results_file(str(smc_range), temperature)
+            smc_combined_df = pd.concat([smc_gradual_df, smc_range_df], ignore_index=True) if not (smc_gradual_df.empty and smc_range_df.empty) else pd.DataFrame()
+        else:
+            smc_combined_df = load_results_by_pattern(f"{results_dir}/smc_*_results.csv", temperature)
+    else:
+        if "*" in smc:
+            smc_combined_df = load_results_by_pattern(smc, temperature)
+        else:
+            smc_combined_df = load_results_file(smc, temperature)
+            if "gradual" in smc.lower():
+                smc_gradual_df = smc_combined_df.copy()
+            elif "range" in smc.lower():
+                smc_range_df = smc_combined_df.copy()
+    
+    # Load SmileyLlama results (distinguish gradual vs range-based)
+    smiley_gradual_df = pd.DataFrame()
+    smiley_range_df = pd.DataFrame()
+    smiley_combined_df = pd.DataFrame()
+    
+    if smiley is None:
+        smiley_all = Path(results_dir) / "smiley_all_results.csv"
+        smiley_gradual = Path(results_dir) / "smiley_gradual_results.csv"
+        smiley_range = Path(results_dir) / "smiley_range_results.csv"
+        if smiley_all.exists():
+            smiley_combined_df = load_results_file(str(smiley_all), temperature)
+        elif smiley_gradual.exists() or smiley_range.exists():
+            if smiley_gradual.exists():
+                smiley_gradual_df = load_results_file(str(smiley_gradual), temperature)
+            if smiley_range.exists():
+                smiley_range_df = load_results_file(str(smiley_range), temperature)
+            smiley_combined_df = pd.concat([smiley_gradual_df, smiley_range_df], ignore_index=True) if not (smiley_gradual_df.empty and smiley_range_df.empty) else pd.DataFrame()
+        else:
+            smiley_combined_df = load_results_by_pattern(f"{results_dir}/smiley_*_results.csv", temperature)
+    else:
+        if "*" in smiley:
+            smiley_combined_df = load_results_by_pattern(smiley, temperature)
+        else:
+            smiley_combined_df = load_results_file(smiley, temperature)
+            if "gradual" in smiley.lower():
+                smiley_gradual_df = smiley_combined_df.copy()
+            elif "range" in smiley.lower():
+                smiley_range_df = smiley_combined_df.copy()
+    
+    return baseline_df, smc_gradual_df, smc_range_df, smiley_gradual_df, smiley_range_df, smc_combined_df, smiley_combined_df
+
+
+def count_result_files(
+    results_dir: str,
+    baseline: Optional[str] = None,
+    smc: Optional[str] = None,
+    smiley: Optional[str] = None,
+) -> tuple[int, int, int]:
+    """
+    Count result files for baseline, SMC, and SmileyLlama.
+    
+    Args:
+        results_dir: Directory containing result files
+        baseline: Optional baseline results file or pattern (None = auto-detect)
+        smc: Optional SMC results file or pattern (None = auto-detect)
+        smiley: Optional SmileyLlama results file or pattern (None = auto-detect)
+    
+    Returns:
+        Tuple of (baseline_count, smc_count, smiley_count)
+    """
+    baseline_count = 0
+    smc_count = 0
+    smiley_count = 0
+    
+    if baseline is None:
+        baseline_combined = Path(results_dir) / "baseline_results.csv"
+        if baseline_combined.exists():
+            baseline_count = 1
+        else:
+            baseline_files = glob.glob(f"{results_dir}/baseline_*_results.csv")
+            baseline_count = len(baseline_files) if baseline_files else 0
+    else:
+        baseline_count = 1
+    
+    if smc is None:
+        smc_all = Path(results_dir) / "smc_all_results.csv"
+        smc_gradual = Path(results_dir) / "smc_gradual_results.csv"
+        smc_range = Path(results_dir) / "smc_range_results.csv"
+        if smc_all.exists():
+            smc_count = 1
+        elif smc_gradual.exists() or smc_range.exists():
+            smc_count = sum([smc_gradual.exists(), smc_range.exists()])
+        else:
+            smc_files = glob.glob(f"{results_dir}/smc_*_results.csv")
+            smc_count = len(smc_files) if smc_files else 0
+    else:
+        smc_count = 1
+    
+    if smiley is None:
+        smiley_all = Path(results_dir) / "smiley_all_results.csv"
+        smiley_gradual = Path(results_dir) / "smiley_gradual_results.csv"
+        smiley_range = Path(results_dir) / "smiley_range_results.csv"
+        if smiley_all.exists():
+            smiley_count = 1
+        elif smiley_gradual.exists() or smiley_range.exists():
+            smiley_count = sum([smiley_gradual.exists(), smiley_range.exists()])
+        else:
+            smiley_files = glob.glob(f"{results_dir}/smiley_*_results.csv")
+            smiley_count = len(smiley_files) if smiley_files else 0
+    else:
+        smiley_count = 1
+    
+    return baseline_count, smc_count, smiley_count
+
+
 def iter_candidate_smiles(text: str) -> List[str]:
     return SMILES_PATTERN.findall(text)
 
@@ -367,6 +669,7 @@ def load_property_ranges(
         
     Returns:
         Dictionary mapping property names to (min, max) tuples
+        NOTE: QED is excluded from constraints (only used for analysis)
     """
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -394,8 +697,14 @@ def load_property_ranges(
             )
         level_data = dataset_data
     
+    # Properties to exclude from constraints (QED is only for analysis, not constraints)
+    excluded_props = {"QED"}
+    
     ranges = {}
     for prop, value in level_data.items():
+        # Skip QED - it's not used as a constraint
+        if prop in excluded_props:
+            continue
         if isinstance(value, list) and len(value) == 2:
             ranges[prop] = (float(value[0]), float(value[1]))
         else:
@@ -447,17 +756,20 @@ def create_gradual_smiley_constraints(
     - logP: <= 3, <= 4, <= 5, <= 10, <= 15, > 15
     - RotB: <= 7, <= 10, > 10
     
-    Gradual constraint levels:
-    - loosen: <= 300 MW
-    - tight: <= 300 MW + <= 4 logP
-    - ultra_tight: <= 300 MW + <= 4 logP + <= 10 RotB
+    Gradual constraint levels (aligned with drug-like properties and range-based constraints):
+    - loosen: <= 500 MW + <= 5 logP (covers most drug-like molecules, aligns with loose range [233-577] MW)
+    - tight: <= 400 MW + <= 4 logP + <= 10 RotB (typical drug-like, aligns with tight range [304-419] MW)
+    - ultra_tight: <= 350 MW + <= 3.5 logP + <= 8 RotB (stricter drug-like, aligns with ultra_tight range [336-372] MW)
+    
+    Note: These constraints use upper bounds only (no lower bounds) to match SmileyLlama's training format.
+    The reward function will still guide toward reasonable values within these bounds.
     """
     if constraint_level == "loosen":
-        return {"MW": (None, 300.0)}
+        return {"MW": (None, 500.0), "logP": (None, 5.0)}
     elif constraint_level == "tight":
-        return {"MW": (None, 300.0), "logP": (None, 4.0)}
+        return {"MW": (None, 400.0), "logP": (None, 4.0), "RotB": (None, 10.0)}
     elif constraint_level == "ultra_tight":
-        return {"MW": (None, 300.0), "logP": (None, 4.0), "RotB": (None, 10.0)}
+        return {"MW": (None, 350.0), "logP": (None, 3.5), "RotB": (None, 8.0)}
     else:
         raise ValueError(f"Unknown constraint level: {constraint_level}. Use 'loosen', 'tight', or 'ultra_tight'")
 
@@ -470,11 +782,11 @@ def create_gradual_smiley_prompt_text(
     Uses upper-bound format (<= X) that SmileyLlama understands.
     """
     if constraint_level == "loosen":
-        return "Output a SMILES string for a molecule with the following properties: <= 300 molecular weight:"
+        return "Output a SMILES string for a molecule with the following properties: <= 500 molecular weight, <= 5 logP:"
     elif constraint_level == "tight":
-        return "Output a SMILES string for a molecule with the following properties: <= 300 molecular weight, <= 4 logP:"
+        return "Output a SMILES string for a molecule with the following properties: <= 400 molecular weight, <= 4 logP, <= 10 rotatable bonds:"
     elif constraint_level == "ultra_tight":
-        return "Output a SMILES string for a molecule with the following properties: <= 300 molecular weight, <= 4 logP, <= 10 rotatable bonds:"
+        return "Output a SMILES string for a molecule with the following properties: <= 350 molecular weight, <= 3.5 logP, <= 8 rotatable bonds:"
     else:
         raise ValueError(f"Unknown constraint level: {constraint_level}")
 

@@ -16,7 +16,12 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .utils import compute_properties_df, PROPERTY_COLUMNS, ensure_directory, compute_percentile_constraints
+from .utils import (
+    compute_properties_df,
+    PROPERTY_COLUMNS,
+    ensure_directory,
+    compute_percentile_constraints,
+)
 
 
 def load_zinc_train(path: str) -> pd.DataFrame:
@@ -71,47 +76,6 @@ def load_chembl_train(path: str) -> pd.DataFrame:
     return df
 
 
-def compute_properties_df_with_progress(smiles_list: list[str], desc: str = "Computing properties") -> pd.DataFrame:
-    """Compute properties with progress bar."""
-    from rdkit import Chem
-    from rdkit.Chem import Crippen, Descriptors, Lipinski, QED, rdMolDescriptors
-    from rdkit import RDLogger
-    
-    # Suppress RDKit SMILES parse error messages
-    RDLogger.DisableLog("rdApp.*")
-    
-    PROPERTY_FNS = {
-        "MW": Descriptors.MolWt,
-        "logP": Crippen.MolLogP,
-        "RotB": Lipinski.NumRotatableBonds,
-        "HBD": Lipinski.NumHDonors,
-        "HBA": Lipinski.NumHAcceptors,
-        "TPSA": Descriptors.TPSA,
-        "QED": QED.qed,
-        "Fsp3": rdMolDescriptors.CalcFractionCSP3,
-    }
-    
-    PROPERTY_COLUMNS = ["MW", "logP", "RotB", "HBD", "HBA", "TPSA", "QED"]
-    
-    records = []
-    for s in tqdm(smiles_list, desc=desc, unit=" mols", ncols=80):
-        mol = Chem.MolFromSmiles(s)
-        if mol is None:
-            records.append(
-                {
-                    "SMILES": s,
-                    "Valid": False,
-                    **{k: np.nan for k in PROPERTY_COLUMNS},
-                    "Fsp3": np.nan,
-                }
-            )
-            continue
-        canonical = Chem.MolToSmiles(mol, canonical=True)
-        record = {"SMILES": canonical, "Valid": True}
-        for key, fn in PROPERTY_FNS.items():
-            record[key] = fn(mol)
-        records.append(record)
-    return pd.DataFrame.from_records(records)
 
 
 def compute_missing_properties(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
@@ -123,7 +87,7 @@ def compute_missing_properties(df: pd.DataFrame, dataset_name: str) -> pd.DataFr
     if not missing_props:
         # All properties exist, just need to validate SMILES and compute Valid flag
         print(f"[{dataset_name}] All properties already exist. Validating SMILES...")
-        props_df = compute_properties_df_with_progress(df["SMILES"].tolist(), f"  [{dataset_name}] Validating")
+        props_df = compute_properties_df(df["SMILES"].tolist(), show_progress=True, desc=f"  [{dataset_name}] Validating")
         # Merge with existing properties
         for prop in existing_props:
             if prop in df.columns:
@@ -132,7 +96,7 @@ def compute_missing_properties(df: pd.DataFrame, dataset_name: str) -> pd.DataFr
     
     print(f"[{dataset_name}] Computing missing properties: {missing_props}")
     # Compute all properties from SMILES with progress bar
-    props_df = compute_properties_df_with_progress(df["SMILES"].tolist(), f"  [{dataset_name}] Computing")
+    props_df = compute_properties_df(df["SMILES"].tolist(), show_progress=True, desc=f"  [{dataset_name}] Computing")
     
     # If some properties already exist, use them instead of recomputed ones
     for prop in existing_props:

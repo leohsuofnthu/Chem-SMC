@@ -12,7 +12,7 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from .utils import all_valid_smiles
+from .utils import all_valid_smiles, seed_all
 
 MODEL_NAME = "THGLab/Llama-3.1-8B-SmileyLlama-1.1"
 
@@ -30,12 +30,6 @@ def _format_smiley_prompt(user_instruction: str) -> str:
     return f"### Instruction:\n{SMILEY_SYSTEM_MSG}\n\n### Input:\n{user_instruction}\n\n### Response:\n"
 
 
-def _seed_all(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 
 def load_model(

@@ -17,12 +17,18 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
-from rdkit import Chem, RDLogger
+# Conditional rdkit import for test compatibility
+try:
+    from rdkit import Chem, RDLogger
+    RDKIT_AVAILABLE = True
+    # Silence RDKit warnings
+    RDLogger.DisableLog("rdApp.*")
+except ImportError:
+    RDKIT_AVAILABLE = False
+    Chem = None
+    RDLogger = None
 from transformers import set_seed
 from tqdm import tqdm
-
-# Silence RDKit warnings
-RDLogger.DisableLog("rdApp.*")
 
 from .utils import (
     GPT_ZINC_PROMPTS,
@@ -39,6 +45,8 @@ from .utils import (
     summarise_adherence,
     first_valid_smiles,
     PROPERTY_FNS,
+    CONSTRAINT_LEVEL_MAP,
+    seed_all,
 )
 
 try:
@@ -93,8 +101,31 @@ class ConstraintBasedMolecularConstraint:
                 rings = Chem.rdMolDescriptors.CalcNumRings(mol)
                 ring_bonus = 1.0 + 0.2 * min(rings, 3)
                 
+                # Distance-based bonus: reward molecules closer to constraint centers/optimal values
+                # This encourages better quality molecules, not just barely satisfying constraints
+                distance_bonus = 1.0
+                for prop_name, (lower, upper) in self.constraints.items():
+                    value = props.get(prop_name)
+                    if value is None or np.isnan(value):
+                        continue
+                    
+                    if lower is not None and upper is not None:
+                        # Range constraint: reward being close to center
+                        center = (lower + upper) / 2.0
+                        width = (upper - lower) / 2.0
+                        if width > 0:
+                            distance_from_center = abs(value - center) / width
+                            # Bonus: 1.0 at center, decays to 1.0 at edges, max 1.15 bonus
+                            distance_bonus *= 1.0 + 0.15 * math.exp(-distance_from_center**2)
+                    elif upper is not None:
+                        # Upper bound only: reward being safely below (not just barely under)
+                        safety_margin = (upper - value) / max(upper, 1e-6)
+                        # Bonus for having safety margin, but not too much (encourages reasonable values)
+                        if 0.1 <= safety_margin <= 0.4:  # Sweet spot: 10-40% below upper bound
+                            distance_bonus *= 1.0 + 0.1 * math.exp(-((safety_margin - 0.25) / 0.1)**2)
+                
                 # Scale reward with number of constraints
-                reward = self.base_reward * ring_bonus
+                reward = self.base_reward * ring_bonus * distance_bonus
                 return float(max(reward, 0.001))
             except:
                 return float(self.base_reward)
@@ -143,13 +174,21 @@ class ConstraintBasedMolecularConstraint:
                     penalty = max(0, 1.0 - (lower - value) / (abs(lower) + 1e-6))
                     score += weight * penalty * 0.3
             elif upper is not None:
-                # Upper bound only
+                # Upper bound only - enhanced with smoother penalty
                 if value <= upper:
-                    score += weight
+                    # Reward being safely below (not just barely under)
+                    safety_margin = (upper - value) / max(upper, 1e-6)
+                    # Full score if satisfied, small bonus for safety margin
+                    safety_bonus = 1.0 + 0.1 * min(safety_margin, 0.2)  # Small bonus for 0-20% margin
+                    score += weight * safety_bonus
                     constraint_satisfied = True
                 else:
-                    penalty = max(0, 1.0 - (value - upper) / (upper + 1e-6))
-                    score += weight * penalty * 0.3
+                    # Exponential decay penalty - smoother gradient than linear
+                    excess = (value - upper) / max(upper, 1e-6)
+                    # Exponential decay: penalty = exp(-2*excess)
+                    # Closer to bound = higher score, further = lower score
+                    penalty = math.exp(-2.0 * excess)
+                    score += weight * penalty * 0.5  # Less harsh than previous 0.3
             
             if constraint_satisfied:
                 satisfied_count += 1
@@ -292,10 +331,10 @@ class SMILESConstraintPotential(Potential):
 @dataclass
 class GenLMSMCSampler:
     model_name: str = DEFAULT_MODEL_NAME
-    particles: int = 50
+    particles: int = 20  # Matches number of GPT_ZINC_PROMPTS (20 prefixes)
     ess_threshold: float = 0.3
     max_new_tokens: int = 60
-    temperature: float = 0.7
+    temperature: float = 1.0  # Standardized to match other experiments
     top_p: float = 0.9
     top_k: int = 30
     
@@ -417,13 +456,6 @@ class GenLMSMCSampler:
         return collected
 
 
-def _seed_everything(seed: int) -> None:
-    """Set random seeds for reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 
 # ============================================================
@@ -473,7 +505,7 @@ def generate_with_multi_prefix_smc(
     Generate molecules using SMC with multiple prefixes.
     Samples prefixes randomly and uses SMC to guide generation.
     """
-    _seed_everything(seed)
+    seed_all(seed)
     
     sampler = GenLMSMCSampler(
         model_name=DEFAULT_MODEL_NAME,
@@ -529,9 +561,9 @@ def run_constraint_experiment(
     property_ranges_path: str = "data/train_property_ranges.json",
     dataset: str = "Combined",
     n: int = 1_000,
-    particles: int = 50,
+    particles: int = 20,  # Matches number of GPT_ZINC_PROMPTS (20 prefixes)
     ess_threshold: float = 0.3,
-    temperature: float = 0.7,
+    temperature: float = 1.0,  # Standardized to match other experiments
     top_p: float = 0.9,
     max_new_tokens: int = 60,
     top_k: int = 30,
@@ -551,8 +583,7 @@ def run_constraint_experiment(
     # Use gradual constraints (SmileyLlama-compatible) or legacy percentile-based constraints
     if use_gradual_constraints:
         # Map legacy names to gradual names for backward compatibility
-        level_map = {"loose": "loosen", "tight": "tight", "ultra_tight": "ultra_tight"}
-        gradual_level = level_map.get(constraint_level, constraint_level)
+        gradual_level = CONSTRAINT_LEVEL_MAP.get(constraint_level, constraint_level)
         constraint_spec = create_gradual_constraint_prompt(gradual_level)
         constraint_spec = PromptSpec(
             name=f"smc_gradual_{gradual_level}",
@@ -633,9 +664,9 @@ def main() -> None:
     parser.add_argument("--property-ranges", type=str, default="data/train_property_ranges.json")
     parser.add_argument("--dataset", type=str, default="Combined", choices=["ZINC", "ChEMBL", "Combined"])
     parser.add_argument("--n", type=int, default=1_000)
-    parser.add_argument("--particles", type=int, default=50, help="Number of SMC particles")
+    parser.add_argument("--particles", type=int, default=20, help="Number of SMC particles (matches number of GPT_ZINC_PROMPTS)")
     parser.add_argument("--ess-threshold", type=float, default=0.3, help="ESS threshold for resampling")
-    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--temperature", type=float, default=1.0, help="Temperature (standardized to 1.0 for fair comparison)")
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--max-new-tokens", type=int, default=60)
     parser.add_argument("--top-k", type=int, default=30, help="Top-k sampling")

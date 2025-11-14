@@ -8,57 +8,33 @@ or combined files if available.
 from __future__ import annotations
 
 import argparse
-import glob
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
-from rdkit import Chem
-from rdkit.Chem import AllChem, DataStructs
-from rdkit import RDLogger
 
-from .utils import ensure_directory
+# Conditional rdkit import for test compatibility
+try:
+    from rdkit.Chem import AllChem, DataStructs
+    from rdkit import RDLogger
+    RDKIT_AVAILABLE = True
+except ImportError:
+    RDKIT_AVAILABLE = False
+    AllChem = None
+    DataStructs = None
+
+from .utils import (
+    ensure_directory,
+    load_results_file,
+    load_results_by_pattern,
+    filter_valid_molecules,
+    load_experiment_results,
+    count_result_files,
+)
 
 # Suppress RDKit SMILES parse error messages
 RDLogger.DisableLog("rdApp.*")
-
-
-def _load_results(path: str) -> pd.DataFrame:
-    """Load a single results CSV file."""
-    df = pd.read_csv(path)
-    if "Valid" not in df.columns:
-        df["Valid"] = df["SMILES"].apply(lambda s: Chem.MolFromSmiles(s) is not None)
-    return df
-
-
-def _load_results_by_pattern(pattern: str) -> pd.DataFrame:
-    """
-    Load all results files matching a glob pattern and combine them.
-    
-    Args:
-        pattern: Glob pattern to match result files (e.g., 'results/baseline_*_results.csv')
-    
-    Returns:
-        Combined DataFrame, or empty DataFrame if no files found.
-    """
-    files = sorted(glob.glob(pattern))
-    if not files:
-        return pd.DataFrame()
-    
-    dfs = []
-    for f in files:
-        df = _load_results(f)
-        dfs.append(df)
-    
-    if not dfs:
-        return pd.DataFrame()
-    
-    return pd.concat(dfs, ignore_index=True)
-
-
-def _valid_df(df: pd.DataFrame) -> pd.DataFrame:
-    return df[df["Valid"]].copy()
 
 
 def tanimoto_diversity(smiles: Iterable[str]) -> float:
@@ -95,7 +71,7 @@ def summarise_group(df: pd.DataFrame) -> pd.Series:
     4. Diversity - Tanimoto diversity (1 - mean similarity)
     """
     total = len(df)
-    valid_df = _valid_df(df)
+    valid_df = filter_valid_molecules(df)
     metrics = {
         "Adherence %": 100.0 * df["Adherence"].mean() if "Adherence" in df else 0.0,
         "Valid %": 100.0 * df["Valid"].mean() if total else 0.0,
@@ -117,7 +93,12 @@ def build_tables(
     if temperature_filter is not None and "Temperature" in df.columns:
         df = df[np.isclose(df["Temperature"], temperature_filter)]
 
+    # Group by Model and ConstraintLevel (if available) to distinguish between gradual and range-based
     group_cols = ["Model"]
+    if "ConstraintLevel" in df.columns and df["ConstraintLevel"].nunique() > 1:
+        # Don't add ConstraintLevel to group_cols for summary - we want to see model performance across all levels
+        # But we can use it to distinguish between gradual (loosen/tight/ultra_tight) and range-based (loose/tight/ultra_tight)
+        pass
     if "Temperature" in df.columns and df["Temperature"].nunique() > 1:
         group_cols.append("Temperature")
 
@@ -131,8 +112,12 @@ def build_tables(
     summary_table = pd.DataFrame(summary_rows)
     summary_table = summary_table[group_cols + ["Adherence %", "Valid %", "Distinct %", "Diversity"]]
 
+    # Panel table groups by Model, ConstraintLevel (if available), and Prompt
     panel_rows: List[pd.Series] = []
-    panel_group_cols = group_cols + ["Prompt"]
+    panel_group_cols = group_cols.copy()
+    if "ConstraintLevel" in df.columns:
+        panel_group_cols.append("ConstraintLevel")
+    panel_group_cols.append("Prompt")
     for keys, group in df.groupby(panel_group_cols):
         keys = keys if isinstance(keys, tuple) else (keys,)
         summary = summarise_group(group)
@@ -198,79 +183,44 @@ Examples:
     # Auto-detect result files if not specified
     results_dir = args.results_dir
     
-    if args.baseline is None:
-        # Try combined file first, then individual files
-        baseline_combined = Path(results_dir) / "baseline_results.csv"
-        if baseline_combined.exists():
-            baseline = _load_results(str(baseline_combined))
-        else:
-            baseline = _load_results_by_pattern(f"{results_dir}/baseline_*_results.csv")
-    else:
-        if "*" in args.baseline:
-            baseline = _load_results_by_pattern(args.baseline)
-        else:
-            baseline = _load_results(args.baseline)
-    
-    if args.smc is None:
-        # Try combined file first, then individual files
-        smc_combined = Path(results_dir) / "smc_results.csv"
-        if smc_combined.exists():
-            smc = _load_results(str(smc_combined))
-        else:
-            smc = _load_results_by_pattern(f"{results_dir}/smc_*_results.csv")
-    else:
-        if "*" in args.smc:
-            smc = _load_results_by_pattern(args.smc)
-        else:
-            smc = _load_results(args.smc)
-    
-    if args.smiley is None:
-        # Try combined file first, then individual files
-        smiley_combined = Path(results_dir) / "smiley_results.csv"
-        if smiley_combined.exists():
-            smiley = _load_results(str(smiley_combined))
-        else:
-            smiley = _load_results_by_pattern(f"{results_dir}/smiley_*_results.csv")
-    else:
-        if "*" in args.smiley:
-            smiley = _load_results_by_pattern(args.smiley)
-        else:
-            smiley = _load_results(args.smiley)
+    # Use consolidated loading function
+    baseline, smc_gradual, smc_range, smiley_gradual, smiley_range, smc, smiley = load_experiment_results(
+        results_dir=results_dir,
+        baseline=args.baseline,
+        smc=args.smc,
+        smiley=args.smiley,
+        temperature=args.temperature,
+    )
     
     # Combine all results
     if baseline.empty and smc.empty and smiley.empty:
         print("Error: No result files found!")
         print(f"  Looked in: {results_dir}/")
-        print("  Expected files: baseline_*_results.csv, smc_*_results.csv, or smiley_*_results.csv")
+        print("  Expected files:")
+        print("    - baseline_results.csv or baseline_*_results.csv")
+        print("    - smc_all_results.csv, smc_gradual_results.csv, smc_range_results.csv, or smc_*_results.csv")
+        print("    - smiley_all_results.csv, smiley_gradual_results.csv, smiley_range_results.csv, or smiley_*_results.csv")
         return
     
     dfs_to_combine = []
+    baseline_count, smc_count, smiley_count = count_result_files(
+        results_dir=results_dir,
+        baseline=args.baseline,
+        smc=args.smc,
+        smiley=args.smiley,
+    )
+    
     if not baseline.empty:
         dfs_to_combine.append(baseline)
-        if args.baseline is None:
-            baseline_files = glob.glob(f"{results_dir}/baseline_*_results.csv")
-            file_count = len(baseline_files) if baseline_files else 0
-        else:
-            file_count = 1
-        print(f"Loaded {len(baseline)} baseline molecules from {file_count} file(s)")
+        print(f"Loaded {len(baseline)} baseline molecules from {baseline_count} file(s)")
     
     if not smc.empty:
         dfs_to_combine.append(smc)
-        if args.smc is None:
-            smc_files = glob.glob(f"{results_dir}/smc_*_results.csv")
-            file_count = len(smc_files) if smc_files else 0
-        else:
-            file_count = 1
-        print(f"Loaded {len(smc)} SMC molecules from {file_count} file(s)")
+        print(f"Loaded {len(smc)} SMC molecules from {smc_count} file(s)")
     
     if not smiley.empty:
         dfs_to_combine.append(smiley)
-        if args.smiley is None:
-            smiley_files = glob.glob(f"{results_dir}/smiley_*_results.csv")
-            file_count = len(smiley_files) if smiley_files else 0
-        else:
-            file_count = 1
-        print(f"Loaded {len(smiley)} SmileyLlama molecules from {file_count} file(s)")
+        print(f"Loaded {len(smiley)} SmileyLlama molecules from {smiley_count} file(s)")
     
     combined = pd.concat(dfs_to_combine, ignore_index=True) if dfs_to_combine else pd.DataFrame()
 

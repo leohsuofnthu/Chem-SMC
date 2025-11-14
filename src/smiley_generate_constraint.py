@@ -28,6 +28,7 @@ from .utils import (
     summarise_adherence,
     compute_properties_df,
     annotate_adherence,
+    CONSTRAINT_LEVEL_MAP,
 )
 
 
@@ -42,7 +43,7 @@ def run_constraint_experiment(
     top_p: float = 0.9,
     max_new_tokens: int = 128,
     batch_size: int = 50,
-    seed: int = 0,
+    seed: int = 42,
     device: Optional[str] = None,
     quantize: bool = True,
     out_csv: str = "results/smiley_results.csv",
@@ -57,8 +58,7 @@ def run_constraint_experiment(
     # Use gradual constraints (SmileyLlama-compatible) or legacy percentile-based constraints
     if use_gradual_constraints:
         # Map legacy names to gradual names for backward compatibility
-        level_map = {"loose": "loosen", "tight": "tight", "ultra_tight": "ultra_tight"}
-        gradual_level = level_map.get(constraint_level, constraint_level)
+        gradual_level = CONSTRAINT_LEVEL_MAP.get(constraint_level, constraint_level)
         constraint_prompt = create_gradual_constraint_prompt(gradual_level)
         prompt_variant_name = f"gradual_{gradual_level}"
     else:
@@ -75,8 +75,9 @@ def run_constraint_experiment(
     formatted_prompt = _format_smiley_prompt(constraint_prompt.text)
     
     # Generate molecules
-    from .smiley_generate import _gather_smiles, _seed_all
-    _seed_all(seed)
+    from .smiley_generate import _gather_smiles
+    from .utils import seed_all
+    seed_all(seed)
     
     smiles = _gather_smiles(
         tokenizer,
@@ -147,7 +148,7 @@ def main() -> None:
     parser.add_argument("--top_p", type=float, default=0.9)
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--batch_size", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--quantize", action="store_true")
     parser.add_argument("--no_quantize", action="store_true")
