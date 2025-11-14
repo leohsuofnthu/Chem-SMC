@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 from .smiley_generate import (
     load_model,
-    generate_for_prompt,
     _format_smiley_prompt,
     SMILEY_SYSTEM_MSG,
 )
@@ -24,6 +23,7 @@ from .utils import (
     PromptSpec,
     load_property_ranges,
     create_constraint_variant,
+    create_gradual_constraint_prompt,
     ensure_directory,
     summarise_adherence,
     compute_properties_df,
@@ -32,10 +32,11 @@ from .utils import (
 
 
 def run_constraint_experiment(
-    constraint_level: str = "loose",  # "loose", "tight", "ultra_tight"
+    constraint_level: str = "loosen",  # "loosen", "tight", "ultra_tight" (or legacy "loose")
+    use_gradual_constraints: bool = True,
     property_ranges_path: str = "data/train_property_ranges.json",
     dataset: str = "Combined",
-    base_prompt_name: str = "mw_logp_rotb",  # Use this prompt as base
+    base_prompt_name: str = "mw_logp_rotb",  # Use this prompt as base (only for legacy mode)
     n: int = 1_000,
     temperature: float = 1.0,
     top_p: float = 0.9,
@@ -49,19 +50,23 @@ def run_constraint_experiment(
 ) -> pd.DataFrame:
     """
     Run a single constraint-level experiment with SmileyLlama.
-    Uses constraint variants to modify the prompt constraints.
+    Uses gradual constraints (loosen/tight/ultra_tight) by default for SmileyLlama compatibility.
     """
     start_time = time.time()
     
-    # Load constraint ranges for this level
-    constraint_ranges = load_property_ranges(property_ranges_path, dataset, constraint_level)
-    
-    # Get base prompt
-    base_prompt = SMILEY_PROMPT_MAP[base_prompt_name]
-    
-    # Create constraint variant for ALL levels (including loose) to ensure prompt text matches evaluation constraints
-    constraint_prompt = create_constraint_variant(base_prompt, constraint_ranges, tightness=constraint_level)
-    prompt_variant_name = f"{base_prompt_name}_{constraint_level}" if constraint_level != "loose" else base_prompt_name
+    # Use gradual constraints (SmileyLlama-compatible) or legacy percentile-based constraints
+    if use_gradual_constraints:
+        # Map legacy names to gradual names for backward compatibility
+        level_map = {"loose": "loosen", "tight": "tight", "ultra_tight": "ultra_tight"}
+        gradual_level = level_map.get(constraint_level, constraint_level)
+        constraint_prompt = create_gradual_constraint_prompt(gradual_level)
+        prompt_variant_name = f"gradual_{gradual_level}"
+    else:
+        # Legacy percentile-based constraints
+        constraint_ranges = load_property_ranges(property_ranges_path, dataset, constraint_level)
+        base_prompt = SMILEY_PROMPT_MAP[base_prompt_name]
+        constraint_prompt = create_constraint_variant(base_prompt, constraint_ranges, tightness=constraint_level)
+        prompt_variant_name = f"{base_prompt_name}_{constraint_level}" if constraint_level != "loose" else base_prompt_name
     
     # Load model
     tokenizer, model = load_model(device=device, quantize=quantize)
@@ -131,7 +136,9 @@ def run_constraint_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Constraint-aware SmileyLlama generation.")
-    parser.add_argument("--constraint-level", type=str, default="loose", choices=["loose", "tight", "ultra_tight"])
+    parser.add_argument("--constraint-level", type=str, default="loosen", choices=["loosen", "tight", "ultra_tight", "loose"])
+    parser.add_argument("--use-gradual-constraints", action="store_true", default=True, help="Use gradual constraints (loosen/tight/ultra_tight)")
+    parser.add_argument("--no-gradual-constraints", action="store_false", dest="use_gradual_constraints", help="Use legacy percentile-based constraints")
     parser.add_argument("--property-ranges", type=str, default="data/train_property_ranges.json")
     parser.add_argument("--dataset", type=str, default="Combined", choices=["ZINC", "ChEMBL", "Combined"])
     parser.add_argument("--base-prompt", type=str, default="mw_logp_rotb", choices=[p.name for p in SMILEY_PROMPTS])
@@ -152,6 +159,7 @@ def main() -> None:
 
     run_constraint_experiment(
         constraint_level=args.constraint_level,
+        use_gradual_constraints=args.use_gradual_constraints,
         property_ranges_path=args.property_ranges,
         dataset=args.dataset,
         base_prompt_name=args.base_prompt,

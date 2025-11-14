@@ -1,2 +1,0 @@
-Valid %,Distinct %,Adherence %,QED,ConstraintLevel,Model,Prompt,Temperature,Runtime_seconds,Runtime_minutes,Runtime_formatted
-100.0,100.0,3.664921465968586,0.7394322661106115,ultra_tight,GPT2-Zinc-87M+SMC,multi_prefix_smc,1.0,909.6069095134735,15.160115158557891,15m 9s

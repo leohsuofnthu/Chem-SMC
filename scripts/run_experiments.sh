@@ -3,11 +3,11 @@
 set -euo pipefail
 
 # Simplified experiment pipeline: Run 3 constraint levels per model
-# - loose: 5th-95th percentile (baseline)
-# - tight: 25th-75th percentile  
-# - ultra_tight: 40th-60th percentile
+# - loosen: <= 300 MW (gradual constraints - SmileyLlama compatible)
+# - tight: <= 300 MW + <= 4 logP
+# - ultra_tight: <= 300 MW + <= 4 logP + <= 10 RotB
 
-CONSTRAINT_LEVELS=(loose tight ultra_tight)
+CONSTRAINT_LEVELS=(loosen tight ultra_tight)
 PROPERTY_RANGES="data/train_property_ranges.json"
 DATASET="Combined"
 N=1000
@@ -31,9 +31,11 @@ if [ ! -f "$PROPERTY_RANGES" ]; then
 fi
 
 # 1. GPT2-Zinc Baseline (multi-prefix, constraint evaluation)
-echo "[1/2] Running GPT2-Zinc baseline with multi-prefix constraint evaluation..."
-for level in "${CONSTRAINT_LEVELS[@]}"; do
-    echo "  - Constraint level: $level"
+# Baseline uses legacy percentile-based constraints (loose/tight/ultra_tight)
+echo "[1/3] Running GPT2-Zinc baseline with multi-prefix constraint evaluation..."
+BASELINE_LEVELS=(loose tight ultra_tight)
+for level in "${BASELINE_LEVELS[@]}"; do
+    echo "  - Constraint level: $level (legacy percentile-based)"
     python -m src.baseline_generate_constraint \
         --constraint-level "$level" \
         --property-ranges "$PROPERTY_RANGES" \
@@ -60,21 +62,23 @@ if files:
 "
 
 # 2. GPT2-Zinc+SMC (SMC-guided generation)
+# SMC uses gradual constraints (loosen/tight/ultra_tight) with dynamic reward scaling
 echo ""
 echo "[2/3] Running GPT2-Zinc+SMC with SMC-guided generation..."
 for level in "${CONSTRAINT_LEVELS[@]}"; do
-    echo "  - Constraint level: $level"
+    echo "  - Constraint level: $level (gradual constraints)"
     python -m src.smc_generate_constraint \
         --constraint-level "$level" \
+        --use-gradual-constraints \
         --property-ranges "$PROPERTY_RANGES" \
         --dataset "$DATASET" \
         --n "$N" \
         --particles 50 \
         --ess-threshold 0.3 \
-        --temperature 1.0 \
+        --temperature 0.7 \
         --top_p 0.9 \
-        --max-new-tokens 128 \
-        --top-k 50000 \
+        --max-new-tokens 60 \
+        --top-k 30 \
         --out-csv "results/smc_${level}_results.csv" \
         --summary-csv "results/smc_${level}_summary.csv"
 done
@@ -93,19 +97,21 @@ if files:
 "
 
 # 3. SmileyLlama (constraint variants)
+# SmileyLlama uses gradual constraints (loosen/tight/ultra_tight) - SmileyLlama-compatible format
 echo ""
 echo "[3/3] Running SmileyLlama with constraint variants..."
 for level in "${CONSTRAINT_LEVELS[@]}"; do
-    echo "  - Constraint level: $level"
+    echo "  - Constraint level: $level (gradual constraints)"
     python -m src.smiley_generate_constraint \
         --constraint-level "$level" \
+        --use-gradual-constraints \
         --property-ranges "$PROPERTY_RANGES" \
         --dataset "$DATASET" \
         --base-prompt mw_logp_rotb \
         --n "$N" \
         --temperature 1.0 \
         --top_p 0.9 \
-        --batch_size 128 \
+        --batch_size 50 \
         --seed 42 \
         --quantize \
         --out-csv "results/smiley_${level}_results.csv" \

@@ -35,6 +35,7 @@ from .utils import (
     ensure_directory,
     load_property_ranges,
     create_constraint_variant,
+    create_gradual_constraint_prompt,
     summarise_adherence,
     first_valid_smiles,
     PROPERTY_FNS,
@@ -57,10 +58,19 @@ class ConstraintBasedMolecularConstraint:
     """
     Reward function that adapts to different constraint levels (loose/tight/ultra_tight).
     Uses the constraint_spec to dynamically score molecules based on property constraints.
+    Reward scales with the number of constraints: more constraints = higher reward for satisfaction.
     """
     def __init__(self, constraint_spec: PromptSpec):
         self.constraint_spec = constraint_spec
         self.constraints = constraint_spec.constraints
+        # Count number of active constraints (non-None bounds)
+        self.num_constraints = sum(
+            1 for lower, upper in self.constraints.values()
+            if lower is not None or upper is not None
+        )
+        # Base reward scales with number of constraints
+        # 1 constraint: base 10.0, 2 constraints: base 15.0, 3+ constraints: base 20.0
+        self.base_reward = 5.0 + (self.num_constraints * 5.0)
         
     def __call__(self, smiles: str) -> float:
         mol = Chem.MolFromSmiles(smiles)
@@ -76,22 +86,23 @@ class ConstraintBasedMolecularConstraint:
         satisfied = check_constraints(props, self.constraints)
         
         if satisfied:
-            # Perfect satisfaction - return high score
-            # Add bonuses for drug-likeness
+            # Perfect satisfaction - return high score that scales with constraint count
+            # More constraints satisfied = higher reward
             try:
-                qed = props.get("QED", 0.5)
-                # Reward higher QED
-                qed_bonus = 1.0 + 0.3 * qed
-                
-                # Ring bonus
+                # Ring bonus (encourages more complex molecules)
                 rings = Chem.rdMolDescriptors.CalcNumRings(mol)
                 ring_bonus = 1.0 + 0.2 * min(rings, 3)
                 
-                return float(max(10.0 * qed_bonus * ring_bonus, 0.001))
+                # Scale reward with number of constraints
+                reward = self.base_reward * ring_bonus
+                return float(max(reward, 0.001))
             except:
-                return 10.0
+                return float(self.base_reward)
         
         # Partial satisfaction - compute soft score
+        # Count how many constraints are satisfied
+        satisfied_count = 0
+        total_constraints = 0
         score = 0.0
         total_weight = 0.0
         
@@ -103,24 +114,31 @@ class ConstraintBasedMolecularConstraint:
             if value is None or np.isnan(value):
                 continue
             
+            total_constraints += 1
             weight = 1.0
             total_weight += weight
             
             # Check if within bounds
+            constraint_satisfied = False
             if lower is not None and upper is not None:
                 # Range constraint
                 center = (lower + upper) / 2.0
                 width = (upper - lower) / 2.0
                 if width > 0:
                     penalty = abs(value - center) / width
-                    score += weight * math.exp(-penalty**2)
+                    constraint_score = math.exp(-penalty**2)
+                    score += weight * constraint_score
+                    if constraint_score > 0.9:  # Consider satisfied if very close
+                        constraint_satisfied = True
                 else:
                     if lower <= value <= upper:
                         score += weight
+                        constraint_satisfied = True
             elif lower is not None:
                 # Lower bound only
                 if value >= lower:
                     score += weight
+                    constraint_satisfied = True
                 else:
                     penalty = max(0, 1.0 - (lower - value) / (abs(lower) + 1e-6))
                     score += weight * penalty * 0.3
@@ -128,18 +146,27 @@ class ConstraintBasedMolecularConstraint:
                 # Upper bound only
                 if value <= upper:
                     score += weight
+                    constraint_satisfied = True
                 else:
                     penalty = max(0, 1.0 - (value - upper) / (upper + 1e-6))
                     score += weight * penalty * 0.3
+            
+            if constraint_satisfied:
+                satisfied_count += 1
         
         if total_weight == 0:
             return 0.001
         
         # Normalize and scale
         normalized_score = score / total_weight
-        scaled_score = max(normalized_score * 5.0, 0.001)
         
-        return float(scaled_score)
+        # Scale reward based on:
+        # 1. How many constraints are satisfied (more = better)
+        # 2. How close to satisfying all constraints
+        constraint_bonus = 1.0 + (satisfied_count / max(total_constraints, 1)) * 0.5
+        scaled_score = normalized_score * (self.base_reward * 0.5) * constraint_bonus
+        
+        return float(max(scaled_score, 0.001))
 
 
 # ============================================================
@@ -497,7 +524,8 @@ def generate_with_multi_prefix_smc(
 
 
 def run_constraint_experiment(
-    constraint_level: str = "loose",
+    constraint_level: str = "loosen",
+    use_gradual_constraints: bool = True,
     property_ranges_path: str = "data/train_property_ranges.json",
     dataset: str = "Combined",
     n: int = 1_000,
@@ -513,24 +541,34 @@ def run_constraint_experiment(
 ) -> pd.DataFrame:
     """
     Run a single constraint-level experiment using SMC-guided generation.
-    Follows the same pattern as baseline_generate_constraint.py.
+    Uses gradual constraints (loosen/tight/ultra_tight) by default.
     """
     start_time = time.time()
     
     if not GENLM_AVAILABLE:
         raise ImportError("genlm-control is required. Install with: pip install genlm-control>=0.2.11")
     
-    # Load constraint ranges for this level
-    constraint_ranges = load_property_ranges(property_ranges_path, dataset, constraint_level)
-    
-    # Create a constraint spec using one of the base prompts as template
-    base_prompt = GPT_ZINC_PROMPTS[0]
-    constraint_spec = create_constraint_variant(base_prompt, constraint_ranges, tightness=constraint_level)
-    constraint_spec = PromptSpec(
-        name=f"smc_{constraint_level}",
-        text="",  # Prefix doesn't matter for constraint checking
-        constraints=constraint_spec.constraints,
-    )
+    # Use gradual constraints (SmileyLlama-compatible) or legacy percentile-based constraints
+    if use_gradual_constraints:
+        # Map legacy names to gradual names for backward compatibility
+        level_map = {"loose": "loosen", "tight": "tight", "ultra_tight": "ultra_tight"}
+        gradual_level = level_map.get(constraint_level, constraint_level)
+        constraint_spec = create_gradual_constraint_prompt(gradual_level)
+        constraint_spec = PromptSpec(
+            name=f"smc_gradual_{gradual_level}",
+            text="",  # Prefix doesn't matter for constraint checking
+            constraints=constraint_spec.constraints,
+        )
+    else:
+        # Legacy percentile-based constraints
+        constraint_ranges = load_property_ranges(property_ranges_path, dataset, constraint_level)
+        base_prompt = GPT_ZINC_PROMPTS[0]
+        constraint_spec = create_constraint_variant(base_prompt, constraint_ranges, tightness=constraint_level)
+        constraint_spec = PromptSpec(
+            name=f"smc_{constraint_level}",
+            text="",  # Prefix doesn't matter for constraint checking
+            constraints=constraint_spec.constraints,
+        )
     
     # Get all prefix prompts
     all_prefixes = GPT_ZINC_PROMPTS
@@ -589,7 +627,9 @@ def run_constraint_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="SMC-guided GPT2-Zinc generation.")
-    parser.add_argument("--constraint-level", type=str, default="loose", choices=["loose", "tight", "ultra_tight"])
+    parser.add_argument("--constraint-level", type=str, default="loosen", choices=["loosen", "tight", "ultra_tight", "loose"])
+    parser.add_argument("--use-gradual-constraints", action="store_true", default=True, help="Use gradual constraints (loosen/tight/ultra_tight)")
+    parser.add_argument("--no-gradual-constraints", action="store_false", dest="use_gradual_constraints", help="Use legacy percentile-based constraints")
     parser.add_argument("--property-ranges", type=str, default="data/train_property_ranges.json")
     parser.add_argument("--dataset", type=str, default="Combined", choices=["ZINC", "ChEMBL", "Combined"])
     parser.add_argument("--n", type=int, default=1_000)
@@ -606,6 +646,7 @@ def main() -> None:
 
     run_constraint_experiment(
         constraint_level=args.constraint_level,
+        use_gradual_constraints=args.use_gradual_constraints,
         property_ranges_path=args.property_ranges,
         dataset=args.dataset,
         n=args.n,

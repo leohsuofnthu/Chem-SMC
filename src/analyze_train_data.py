@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .utils import compute_properties_df, percentile_ranges, PROPERTY_COLUMNS, ensure_directory, compute_percentile_constraints
+from .utils import compute_properties_df, PROPERTY_COLUMNS, ensure_directory, compute_percentile_constraints
 
 
 def load_zinc_train(path: str) -> pd.DataFrame:
@@ -264,8 +264,9 @@ def save_property_ranges(
     zinc_valid = zinc_df[zinc_df["Valid"]].copy() if "Valid" in zinc_df.columns else zinc_df
     chembl_valid = chembl_df[chembl_df["Valid"]].copy() if "Valid" in chembl_df.columns else chembl_df
     
-    # Properties to analyze (focusing on the 4 key ones: MW, logP, RB, QED)
-    target_props = ["MW", "logP", "RotB", "QED"]
+    # Properties to analyze for constraints (MW, logP, RotB)
+    # QED is computed but not used as a constraint
+    target_props = ["MW", "logP", "RotB"]
     
     # Combine datasets for combined ranges
     combined_valid = pd.concat([zinc_valid, chembl_valid], ignore_index=True)
@@ -384,7 +385,7 @@ def main() -> None:
     ensure_directory(args.output_dir)
     output_dir = Path(args.output_dir)
     
-    # Properties to visualize
+    # Properties to visualize (includes QED for analysis, but QED is not used as constraint)
     properties = ["MW", "logP", "RotB", "QED"]
     
     # Create visualizations

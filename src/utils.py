@@ -28,17 +28,8 @@ class PromptSpec:
 
 # Instruction-style prompts for SMILEY (instruction-tuned model)
 # Format: "Output a SMILES string for..." to match SmileyLlama's expected format
+# Only mw_logp_rotb is used in constraint-based experiments as the base prompt
 SMILEY_PROMPTS: List[PromptSpec] = [
-    PromptSpec(
-        name="lipinski",
-        text="Output a SMILES string for a drug like molecule with the following properties: <= 5 H-bond donors, <= 10 H-bond acceptors, <= 500 molecular weight, <= 5 logP:",
-        constraints={
-            "HBD": (None, 5),
-            "HBA": (None, 10),
-            "MW": (None, 500),
-            "logP": (None, 5),
-        },
-    ),
     PromptSpec(
         name="mw_logp_rotb",
         text="Output a SMILES string for a molecule with the following properties: molecular weight 300-400, logP 2-4, and <= 7 rotatable bonds:",
@@ -46,22 +37,6 @@ SMILEY_PROMPTS: List[PromptSpec] = [
             "MW": (300, 400),
             "logP": (2, 4),
             "RotB": (None, 7),
-        },
-    ),
-    PromptSpec(
-        name="tpsa_fsp3",
-        text="Output a SMILES string for a molecule with the following properties: <= 90 TPSA and > 0.5 Fsp3:",
-        constraints={
-            "TPSA": (None, 90),
-            "Fsp3": (0.5, None),
-        },
-    ),
-    PromptSpec(
-        name="druglike_qed",
-        text="Output a SMILES string for a drug-like molecule:",
-        constraints={
-            # QED >= 0.6 is a common heuristic for drug-like behaviour.
-            "QED": (0.6, None),
         },
     ),
 ]
@@ -350,22 +325,6 @@ def summarise_adherence(df: pd.DataFrame) -> pd.Series:
     )
 
 
-def percentile_ranges(
-    df: pd.DataFrame,
-    cols: Iterable[str],
-    q_low: float = 0.05,
-    q_high: float = 0.95,
-) -> Dict[str, Tuple[float, float]]:
-    ranges = {}
-    valid = df[df["Valid"]]
-    for col in cols:
-        values = valid[col].dropna()
-        if values.empty:
-            continue
-        ranges[col] = (float(values.quantile(q_low)), float(values.quantile(q_high)))
-    return ranges
-
-
 def ensure_directory(path: str) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
@@ -477,6 +436,49 @@ def compute_percentile_constraints(
     return constraints
 
 
+def create_gradual_smiley_constraints(
+    constraint_level: str = "loosen",
+) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
+    """
+    Create gradual constraints compatible with SmileyLlama's training format.
+    
+    SmileyLlama understands:
+    - MW: <= 300, <= 400, <= 500, <= 600, > 600
+    - logP: <= 3, <= 4, <= 5, <= 10, <= 15, > 15
+    - RotB: <= 7, <= 10, > 10
+    
+    Gradual constraint levels:
+    - loosen: <= 300 MW
+    - tight: <= 300 MW + <= 4 logP
+    - ultra_tight: <= 300 MW + <= 4 logP + <= 10 RotB
+    """
+    if constraint_level == "loosen":
+        return {"MW": (None, 300.0)}
+    elif constraint_level == "tight":
+        return {"MW": (None, 300.0), "logP": (None, 4.0)}
+    elif constraint_level == "ultra_tight":
+        return {"MW": (None, 300.0), "logP": (None, 4.0), "RotB": (None, 10.0)}
+    else:
+        raise ValueError(f"Unknown constraint level: {constraint_level}. Use 'loosen', 'tight', or 'ultra_tight'")
+
+
+def create_gradual_smiley_prompt_text(
+    constraint_level: str = "loosen",
+) -> str:
+    """
+    Create SmileyLlama prompt text for gradual constraints.
+    Uses upper-bound format (<= X) that SmileyLlama understands.
+    """
+    if constraint_level == "loosen":
+        return "Output a SMILES string for a molecule with the following properties: <= 300 molecular weight:"
+    elif constraint_level == "tight":
+        return "Output a SMILES string for a molecule with the following properties: <= 300 molecular weight, <= 4 logP:"
+    elif constraint_level == "ultra_tight":
+        return "Output a SMILES string for a molecule with the following properties: <= 300 molecular weight, <= 4 logP, <= 10 rotatable bonds:"
+    else:
+        raise ValueError(f"Unknown constraint level: {constraint_level}")
+
+
 def create_constraint_variant(
     base_prompt: PromptSpec,
     constraint_ranges: Dict[str, Tuple[float, float]],
@@ -496,14 +498,19 @@ def create_constraint_variant(
     # Create new constraints dict, using EXACT ranges for properties that exist in constraint_ranges
     # NOTE: These exact constraints are used for evaluation (both SmileyLlama and SMC)
     # The prompt text below is separate and only affects SmileyLlama's generation, not evaluation
+    # IMPORTANT: Use ALL properties from constraint_ranges for fair evaluation across all models
+    # This ensures SMC and SmileyLlama use the SAME constraints regardless of base prompt
     new_constraints = {}
     
+    # First, add ALL properties from constraint_ranges (this ensures fairness)
+    for prop, (lower, upper) in constraint_ranges.items():
+        new_constraints[prop] = (float(lower), float(upper))
+    
+    # Then, add any properties from base_prompt that are NOT in constraint_ranges
+    # (for backward compatibility)
     for prop, (lower, upper) in base_prompt.constraints.items():
-        if prop in constraint_ranges:
-            # Use the EXACT range from constraint_ranges for fair evaluation across all models
-            new_constraints[prop] = constraint_ranges[prop]
-        else:
-            # Keep original constraint
+        if prop not in constraint_ranges:
+            # Keep original constraint only if not in constraint_ranges
             new_constraints[prop] = (lower, upper)
     
     # Create new prompt name with tightness suffix
@@ -514,7 +521,7 @@ def create_constraint_variant(
     # Convert ranges to upper-bound format to match training distribution
     # NOTE: This prompt text is ONLY for SmileyLlama generation - evaluation uses new_constraints above
     new_text = base_prompt.text
-    if any(prop in constraint_ranges for prop in ["MW", "logP", "RotB", "QED"]):
+    if any(prop in constraint_ranges for prop in ["MW", "logP", "RotB"]):
         # Update molecular weight - use both lower and upper bounds when available
         # Training format: <= 300, <= 400, <= 500, <= 600, > 600
         if "MW" in constraint_ranges:
@@ -696,5 +703,23 @@ def create_constraint_variant(
         name=new_name,
         text=new_text,  # Used for SmileyLlama generation (>= X and <= Y or <= X format)
         constraints=new_constraints,  # Used for evaluation (exact ranges, fair for all models)
+    )
+
+
+def create_gradual_constraint_prompt(
+    constraint_level: str = "loosen",
+) -> PromptSpec:
+    """
+    Create a PromptSpec for gradual constraints (loosen/tight/ultra_tight).
+    Uses SmileyLlama-compatible format with upper bounds only.
+    """
+    constraints = create_gradual_smiley_constraints(constraint_level)
+    text = create_gradual_smiley_prompt_text(constraint_level)
+    name = f"gradual_{constraint_level}"
+    
+    return PromptSpec(
+        name=name,
+        text=text,
+        constraints=constraints,
     )
 

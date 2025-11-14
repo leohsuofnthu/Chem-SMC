@@ -1,11 +1,12 @@
 # chem-smc
 
-Two complementary strategies for controlled molecule generation:
+Three strategies for controlled molecule generation:
 
-1. **GPT2-Zinc-87M Baseline** with multi-prefix sampling and constraint evaluation  
-2. **SmileyLlama-8B** instruction following with prompt-based constraints
+1. **GPT2-Zinc-87M Baseline** with multi-prefix sampling and constraint evaluation (range-based constraints)
+2. **GPT2-Zinc+SMC** with SMC-guided generation using gradual constraints  
+3. **SmileyLlama-8B** instruction following with gradual constraints
 
-Both approaches are evaluated using constraint-based metrics: Adherence %, Valid %, Distinct %, and Diversity.
+All approaches are evaluated using constraint-based metrics: Adherence %, Valid %, Distinct %, and Diversity.
 
 ## Quickstart
 ```bash
@@ -40,7 +41,7 @@ This will:
 
 ## Simplified Pipeline
 
-The pipeline now runs **3 experiments per model** (loose/tight/ultra_tight constraints) instead of separate experiments for each prompt.
+The pipeline runs **3 constraint levels per model** (loosen/tight/ultra_tight for SMC/SmileyLlama, loose/tight/ultra_tight for Baseline) for a total of **9 experiments**.
 
 ### Step 1: Analyze Training Data
 ```bash
@@ -50,19 +51,24 @@ This generates `data/train_property_ranges.json` with constraint levels (loose, 
 
 ### Step 2: Run Experiments
 ```bash
-# Run all experiments (2 models × 3 constraint levels = 6 experiments total)
+# Run all experiments (3 models × 3 constraint levels = 9 experiments total)
 bash scripts/run_experiments.sh
 
 # Or run individually:
-# GPT2-Zinc baseline (multi-prefix, constraint-filtered)
+# GPT2-Zinc baseline (range-based constraints: loose/tight/ultra_tight)
 python -m src.baseline_generate_constraint --constraint-level loose
 python -m src.baseline_generate_constraint --constraint-level tight
 python -m src.baseline_generate_constraint --constraint-level ultra_tight
 
-# SmileyLlama (constraint variants)
-python -m src.smiley_generate_constraint --constraint-level loose
-python -m src.smiley_generate_constraint --constraint-level tight
-python -m src.smiley_generate_constraint --constraint-level ultra_tight
+# GPT2-Zinc+SMC (gradual constraints: loosen/tight/ultra_tight)
+python -m src.smc_generate_constraint --constraint-level loosen --use-gradual-constraints
+python -m src.smc_generate_constraint --constraint-level tight --use-gradual-constraints
+python -m src.smc_generate_constraint --constraint-level ultra_tight --use-gradual-constraints
+
+# SmileyLlama (gradual constraints: loosen/tight/ultra_tight)
+python -m src.smiley_generate_constraint --constraint-level loosen --use-gradual-constraints
+python -m src.smiley_generate_constraint --constraint-level tight --use-gradual-constraints
+python -m src.smiley_generate_constraint --constraint-level ultra_tight --use-gradual-constraints
 ```
 
 ### Step 3: Evaluate & Visualize
@@ -77,14 +83,21 @@ python -m src.plots
 ## Key Changes
 
 **GPT2-Zinc Baseline:**
-- **Multi-prefix sampling**: Randomly samples from all 20 available prefixes during generation
-- **Constraint filtering**: Filters generated molecules by constraint adherence
-- **3 experiments**: One per constraint level (loose/tight/ultra_tight)
+- **Range-based constraints**: Uses percentile-based ranges from training data (loose/tight/ultra_tight)
+- **Multi-prefix sampling**: Randomly samples from all available prefixes during generation
+- **Constraint evaluation**: Evaluates constraint adherence without filtering
+- **3 experiments**: One per constraint level
+
+**GPT2-Zinc+SMC:**
+- **Gradual constraints**: Uses fixed upper bounds (loosen/tight/ultra_tight)
+- **SMC-guided generation**: Sequential Monte Carlo sampling with constraint-based rewards
+- **Dynamic reward scaling**: Adjusts rewards based on constraint satisfaction
+- **3 experiments**: One per constraint level
 
 **SmileyLlama:**
-- **Constraint variants**: Uses pre-computed constraint ranges (loose/tight/ultra_tight)
-- **3 experiments**: One per constraint level
+- **Gradual constraints**: Uses fixed upper bounds compatible with SmileyLlama (loosen/tight/ultra_tight)
 - **Instruction-tuned**: Uses proper prompt template format for SmileyLlama
+- **3 experiments**: One per constraint level
 
 Outputs land in `results/` (CSV tables) and `figures/` (PNGs) with a unified schema:
 `SMILES, Valid, QED, MW, logP, RotB, TPSA, HBD, HBA, Adherence, Weight, Model, Prompt, Temperature, TopP`.
@@ -101,6 +114,8 @@ No reference dataset needed - evaluation is purely constraint-based.
 
 ## Notes
 - SmileyLlama is heavy; 4-bit quantisation keeps GPU usage ≈4 GB. Pass `--no_quantize` to force full precision.  
-- GPT2-Zinc baseline uses random prefix selection from all 20 available prefixes, then filters by constraints.  
-- Adjust prompts or property ranges via `src/utils.py` (`PROMPTS` list).
-- Constraint levels are pre-computed from training data: loose (5th-95th), tight (25th-75th), ultra_tight (40th-60th percentiles).
+- **Constraint types**: Baseline uses range-based (percentile) constraints, while SMC and SmileyLlama use gradual (upper-bound) constraints
+- **Gradual constraints**: loosen (MW ≤ 300), tight (MW ≤ 300, logP ≤ 4), ultra_tight (MW ≤ 300, logP ≤ 4, RotB ≤ 10)
+- **Range-based constraints**: Pre-computed from training data - loose (5th-95th percentile), tight (25th-75th), ultra_tight (40th-60th)
+- SMC requires `genlm-control` library: `pip install genlm-control>=0.2.11`  
+- Adjust prompts or property ranges via `src/utils.py`

@@ -1,28 +1,18 @@
 """
-SmileyLlama inference with property evaluation.
+SmileyLlama inference utilities for constraint-based generation.
+Provides model loading and SMILES generation functions used by smiley_generate_constraint.
 """
 from __future__ import annotations
 
-import argparse
 import random
-from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
 import numpy as np
-import pandas as pd
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from .utils import (
-    SMILEY_PROMPTS,
-    SMILEY_PROMPT_MAP,
-    annotate_adherence,
-    all_valid_smiles,
-    compute_properties_df,
-    ensure_directory,
-    summarise_adherence,
-)
+from .utils import all_valid_smiles
 
 MODEL_NAME = "THGLab/Llama-3.1-8B-SmileyLlama-1.1"
 
@@ -179,146 +169,3 @@ def _gather_smiles(
         pbar.close()
     
     return collected[:target_n]
-
-
-def generate_for_prompt(
-    tokenizer: AutoTokenizer,
-    model: AutoModelForCausalLM,
-    prompt_name: str,
-    n: int = 1_000,
-    temperature: float = 1.0,
-    top_p: float = 0.9,
-    max_new_tokens: int = 128,
-    batch_size: int = 50,
-    seed: int = 0,
-) -> pd.DataFrame:
-    _seed_all(seed)
-    spec = SMILEY_PROMPT_MAP[prompt_name]
-    # Format the prompt using SmileyLlama's expected template
-    formatted_prompt = _format_smiley_prompt(spec.text)
-    smiles = _gather_smiles(
-        tokenizer,
-        model,
-        formatted_prompt,  # Use formatted prompt with template
-        target_n=n,
-        temperature=temperature,
-        top_p=top_p,
-        max_new_tokens=max_new_tokens,
-        batch_size=batch_size,
-    )
-    df = compute_properties_df(smiles[:n])
-    df = annotate_adherence(df, spec)
-    df["Model"] = "SmileyLlama-8B"
-    df["Prompt"] = spec.name
-    df["Temperature"] = temperature
-    df["TopP"] = top_p
-    df["Weight"] = 1.0
-    return df
-
-
-def run_experiment(
-    prompt_names: Iterable[str],
-    out_csv: str,
-    summary_csv: str,
-    temperatures: Optional[Iterable[float]] = None,
-    n: int = 1_000,
-    top_p: float = 0.9,
-    max_new_tokens: int = 128,
-    batch_size: int = 50,
-    seed: int = 0,
-    device: Optional[str] = None,
-    quantize: bool = True,
-    low_cpu_mem_usage: bool = True,
-    max_memory: Optional[dict] = None,
-) -> pd.DataFrame:
-    tokenizer, model = load_model(
-        device=device,
-        quantize=quantize,
-        low_cpu_mem_usage=low_cpu_mem_usage,
-        max_memory=max_memory,
-    )
-    frames: List[pd.DataFrame] = []
-    summaries: List[pd.Series] = []
-    temp_list = list(temperatures or [1.0])
-    
-    # Create progress bar for experiment
-    total_experiments = len(prompt_names) * len(temp_list)
-    exp_pbar = tqdm(
-        total=total_experiments,
-        desc="Running SmileyLlama experiments",
-        unit="exp",
-        ncols=80,
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
-    )
-    
-    try:
-        for idx, prompt_name in enumerate(prompt_names):
-            for temp in temp_list:
-                exp_pbar.set_postfix({"Prompt": prompt_name, "Temp": f"{temp:.1f}"})
-                
-                df = generate_for_prompt(
-                    tokenizer,
-                    model,
-                    prompt_name,
-                    n=n,
-                    temperature=temp,
-                    top_p=top_p,
-                    max_new_tokens=max_new_tokens,
-                    batch_size=batch_size,
-                    seed=seed + idx,
-                )
-                frames.append(df)
-                summary = summarise_adherence(df)
-                summary["Prompt"] = prompt_name
-                summary["Model"] = "SmileyLlama-8B"
-                summary["Temperature"] = temp
-                summaries.append(summary)
-                
-                exp_pbar.update(1)
-    finally:
-        exp_pbar.close()
-
-    results = pd.concat(frames, ignore_index=True)
-    ensure_directory(Path(out_csv).parent.as_posix())
-    results.to_csv(out_csv, index=False)
-
-    pd.DataFrame(summaries).to_csv(summary_csv, index=False)
-    return results
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="SmileyLlama molecular generation.")
-    parser.add_argument("--prompts", nargs="+", default=[p.name for p in SMILEY_PROMPTS])
-    parser.add_argument("--n", type=int, default=1_000)
-    parser.add_argument("--temperatures", type=float, nargs="+", default=[1.0])
-    parser.add_argument("--top_p", type=float, default=0.9)
-    parser.add_argument("--max_new_tokens", type=int, default=128)
-    parser.add_argument("--batch_size", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default=None)
-    parser.add_argument("--quantize", action="store_true")
-    parser.add_argument("--no_quantize", action="store_true")
-    parser.add_argument("--out_csv", type=str, default="results/smiley_results.csv")
-    parser.add_argument("--summary_csv", type=str, default="results/smiley_summary.csv")
-    args = parser.parse_args()
-
-    quantize = args.quantize or not args.no_quantize
-
-    set_seed(args.seed)
-    run_experiment(
-        prompt_names=args.prompts,
-        out_csv=args.out_csv,
-        summary_csv=args.summary_csv,
-        temperatures=args.temperatures,
-        n=args.n,
-        top_p=args.top_p,
-        max_new_tokens=args.max_new_tokens,
-        batch_size=args.batch_size,
-        seed=args.seed,
-        device=args.device,
-        quantize=quantize,
-    )
-
-
-if __name__ == "__main__":
-    main()

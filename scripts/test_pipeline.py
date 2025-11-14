@@ -84,9 +84,9 @@ def test_baseline_generation(n=10):
     try:
         from src.baseline_generate_constraint import run_constraint_experiment
         
-        print(f"  Running with n={n} molecules, constraint_level='loose'...")
+        print(f"  Running with n={n} molecules, constraint_level='loosen' (gradual constraints)...")
         df = run_constraint_experiment(
-            constraint_level="loose",
+            constraint_level="loosen",
             property_ranges_path="data/train_property_ranges.json",
             dataset="Combined",
             n=n,
@@ -122,10 +122,11 @@ def test_smc_generation(n=10, genlm_available=True):
     try:
         from src.smc_generate_constraint import run_constraint_experiment
         
-        print(f"  Running with n={n} molecules, constraint_level='loose'...")
+        print(f"  Running with n={n} molecules, constraint_level='loosen' (gradual constraints)...")
         print(f"  Using reduced SMC parameters for faster testing...")
         df = run_constraint_experiment(
-            constraint_level="loose",
+            constraint_level="loosen",
+            use_gradual_constraints=True,  # Use new gradual constraint system
             property_ranges_path="data/train_property_ranges.json",
             dataset="Combined",
             n=n,
@@ -168,9 +169,10 @@ def test_smiley_generation(n=10):
     try:
         from src.smiley_generate_constraint import run_constraint_experiment
         
-        print(f"  Running with n={n} molecules, constraint_level='loose'...")
+        print(f"  Running with n={n} molecules, constraint_level='loosen' (gradual constraints)...")
         df = run_constraint_experiment(
-            constraint_level="loose",
+            constraint_level="loosen",
+            use_gradual_constraints=True,  # Use new gradual constraint system
             property_ranges_path="data/train_property_ranges.json",
             dataset="Combined",
             base_prompt_name="mw_logp_rotb",
@@ -354,7 +356,9 @@ def main():
         print("\nTo run full experiments:")
         print("  bash scripts/run_experiments.sh")
         print("  or")
-        print("  python -m src.baseline_generate_constraint --constraint-level loose --n 1000")
+        print("  python -m src.baseline_generate_constraint --constraint-level loosen --n 1000")
+        print("  python -m src.smc_generate_constraint --constraint-level loosen --n 1000")
+        print("  python -m src.smiley_generate_constraint --constraint-level loosen --n 1000")
         
         # Warn about optional components
         if not genlm_available:
