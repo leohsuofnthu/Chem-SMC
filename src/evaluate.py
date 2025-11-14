@@ -100,6 +100,40 @@ def build_tables(
     if temperature_filter is not None and "Temperature" in df.columns:
         df = df[np.isclose(df["Temperature"], temperature_filter)]
 
+    # Ensure ConstraintType is set for all rows
+    if "ConstraintType" not in df.columns:
+        df["ConstraintType"] = None
+    
+    # Fill missing ConstraintType based on ConstraintLevel
+    if "ConstraintLevel" in df.columns:
+        mask_missing = df["ConstraintType"].isna() | (df["ConstraintType"] == "")
+        if mask_missing.any():
+            # Infer from ConstraintLevel: "loosen" = gradual, "loose" = range-based
+            df.loc[mask_missing & (df["ConstraintLevel"] == "loosen"), "ConstraintType"] = "gradual"
+            df.loc[mask_missing & (df["ConstraintLevel"] == "loose"), "ConstraintType"] = "range-based"
+            
+            # For "tight" and "ultra_tight", try to infer from Model or Prompt
+            # Baseline always uses range-based
+            df.loc[mask_missing & (df["Model"] == "GPT2-Zinc-87M"), "ConstraintType"] = "range-based"
+            
+            # For SMC and SmileyLlama with tight/ultra_tight, check if we have both types
+            # If we can't determine, leave as None (will be grouped separately)
+            # But try to infer from existing data: if we have "loosen" entries, likely gradual
+            # If we have "loose" entries, likely range-based
+            for model in ["GPT2-Zinc-87M+SMC", "SmileyLlama-8B"]:
+                model_mask = mask_missing & (df["Model"] == model)
+                if model_mask.any():
+                    # Check if this model has any gradual entries
+                    has_gradual = ((df["Model"] == model) & (df["ConstraintType"] == "gradual")).any()
+                    has_range = ((df["Model"] == model) & (df["ConstraintType"] == "range-based")).any()
+                    
+                    # If we have gradual but no range, assume ambiguous ones are gradual
+                    if has_gradual and not has_range:
+                        df.loc[model_mask, "ConstraintType"] = "gradual"
+                    # If we have range but no gradual, assume ambiguous ones are range-based
+                    elif has_range and not has_gradual:
+                        df.loc[model_mask, "ConstraintType"] = "range-based"
+
     # Group by Model and ConstraintLevel (if available) to distinguish between gradual and range-based
     group_cols = ["Model"]
     if "ConstraintLevel" in df.columns and df["ConstraintLevel"].nunique() > 1:
@@ -119,12 +153,18 @@ def build_tables(
     summary_table = pd.DataFrame(summary_rows)
     summary_table = summary_table[group_cols + ["Adherence %", "Valid %", "Distinct %", "Diversity"]]
 
-    # Panel table groups by Model, ConstraintLevel (if available), and Prompt
+    # Panel table groups by Model, ConstraintType (if available), ConstraintLevel (if available), and Prompt
     panel_rows: List[pd.Series] = []
     panel_group_cols = group_cols.copy()
+    
+    # Add ConstraintType if available to distinguish gradual vs range-based
+    if "ConstraintType" in df.columns and df["ConstraintType"].notna().any():
+        panel_group_cols.append("ConstraintType")
+    
     if "ConstraintLevel" in df.columns:
         panel_group_cols.append("ConstraintLevel")
     panel_group_cols.append("Prompt")
+    
     for keys, group in df.groupby(panel_group_cols):
         keys = keys if isinstance(keys, tuple) else (keys,)
         summary = summarise_group(group)

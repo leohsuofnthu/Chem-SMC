@@ -436,6 +436,7 @@ def load_results_file(path: str, temperature: Optional[float] = None) -> pd.Data
 def load_results_by_pattern(pattern: str, temperature: Optional[float] = None) -> pd.DataFrame:
     """
     Load all results files matching a glob pattern and combine them.
+    Adds ConstraintType column based on filename to distinguish gradual vs range-based.
     
     Args:
         pattern: Glob pattern to match result files (e.g., 'results/baseline_*_results.csv')
@@ -451,6 +452,27 @@ def load_results_by_pattern(pattern: str, temperature: Optional[float] = None) -
     dfs = []
     for f in files:
         df = load_results_file(f, temperature)
+        # Add ConstraintType based on filename to distinguish gradual vs range-based
+        f_str = str(f).lower()
+        if "gradual" in f_str:
+            df["ConstraintType"] = "gradual"
+        elif "range" in f_str:
+            df["ConstraintType"] = "range-based"
+        elif "baseline" in f_str:
+            # Baseline uses range-based constraints
+            df["ConstraintType"] = "range-based"
+        else:
+            # Default: try to infer from ConstraintLevel
+            if "ConstraintLevel" in df.columns:
+                if "loosen" in df["ConstraintLevel"].values:
+                    df["ConstraintType"] = "gradual"
+                elif "loose" in df["ConstraintLevel"].values and "loosen" not in df["ConstraintLevel"].values:
+                    df["ConstraintType"] = "range-based"
+                else:
+                    # Ambiguous - leave as None, will be handled later
+                    df["ConstraintType"] = None
+            else:
+                df["ConstraintType"] = None
         dfs.append(df)
     
     if not dfs:
@@ -499,13 +521,20 @@ def load_experiment_results(
         baseline_combined = Path(results_dir) / "baseline_results.csv"
         if baseline_combined.exists():
             baseline_df = load_results_file(str(baseline_combined), temperature)
+            baseline_df["ConstraintType"] = "range-based"  # Baseline uses range-based constraints
         else:
             baseline_df = load_results_by_pattern(f"{results_dir}/baseline_*_results.csv", temperature)
+            # Ensure ConstraintType is set for baseline
+            if "ConstraintType" not in baseline_df.columns or baseline_df["ConstraintType"].isna().any():
+                baseline_df["ConstraintType"] = "range-based"
     else:
         if "*" in baseline:
             baseline_df = load_results_by_pattern(baseline, temperature)
+            if "ConstraintType" not in baseline_df.columns or baseline_df["ConstraintType"].isna().any():
+                baseline_df["ConstraintType"] = "range-based"
         else:
             baseline_df = load_results_file(baseline, temperature)
+            baseline_df["ConstraintType"] = "range-based"  # Baseline uses range-based constraints
     
     # Load SMC results (distinguish gradual vs range-based)
     smc_gradual_df = pd.DataFrame()
@@ -516,25 +545,64 @@ def load_experiment_results(
         smc_all = Path(results_dir) / "smc_all_results.csv"
         smc_gradual = Path(results_dir) / "smc_gradual_results.csv"
         smc_range = Path(results_dir) / "smc_range_results.csv"
-        if smc_all.exists():
+        
+        # Always try to load individual files first (they have all constraint levels)
+        individual_files = load_results_by_pattern(f"{results_dir}/smc_*_*_results.csv", temperature)
+        if not individual_files.empty:
+            # Individual files loaded - split by ConstraintType
+            if "ConstraintType" in individual_files.columns:
+                smc_gradual_df = individual_files[individual_files["ConstraintType"] == "gradual"].copy()
+                smc_range_df = individual_files[individual_files["ConstraintType"] == "range-based"].copy()
+            smc_combined_df = individual_files.copy()
+        elif smc_all.exists():
             smc_combined_df = load_results_file(str(smc_all), temperature)
+            # Try to infer ConstraintType from ConstraintLevel
+            if "ConstraintType" not in smc_combined_df.columns:
+                if "ConstraintLevel" in smc_combined_df.columns:
+                    smc_combined_df["ConstraintType"] = smc_combined_df["ConstraintLevel"].apply(
+                        lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
+                    )
+            # Split into gradual and range-based
+            if "ConstraintType" in smc_combined_df.columns:
+                smc_gradual_df = smc_combined_df[smc_combined_df["ConstraintType"] == "gradual"].copy()
+                smc_range_df = smc_combined_df[smc_combined_df["ConstraintType"] == "range-based"].copy()
         elif smc_gradual.exists() or smc_range.exists():
             if smc_gradual.exists():
                 smc_gradual_df = load_results_file(str(smc_gradual), temperature)
+                smc_gradual_df["ConstraintType"] = "gradual"
             if smc_range.exists():
                 smc_range_df = load_results_file(str(smc_range), temperature)
+                smc_range_df["ConstraintType"] = "range-based"
             smc_combined_df = pd.concat([smc_gradual_df, smc_range_df], ignore_index=True) if not (smc_gradual_df.empty and smc_range_df.empty) else pd.DataFrame()
         else:
+            # Load all SMC files with pattern matching (fallback)
             smc_combined_df = load_results_by_pattern(f"{results_dir}/smc_*_results.csv", temperature)
+            # Split into gradual and range-based based on ConstraintType
+            if "ConstraintType" in smc_combined_df.columns:
+                smc_gradual_df = smc_combined_df[smc_combined_df["ConstraintType"] == "gradual"].copy()
+                smc_range_df = smc_combined_df[smc_combined_df["ConstraintType"] == "range-based"].copy()
     else:
         if "*" in smc:
             smc_combined_df = load_results_by_pattern(smc, temperature)
+            # Split into gradual and range-based based on ConstraintType
+            if "ConstraintType" in smc_combined_df.columns:
+                smc_gradual_df = smc_combined_df[smc_combined_df["ConstraintType"] == "gradual"].copy()
+                smc_range_df = smc_combined_df[smc_combined_df["ConstraintType"] == "range-based"].copy()
         else:
             smc_combined_df = load_results_file(smc, temperature)
             if "gradual" in smc.lower():
                 smc_gradual_df = smc_combined_df.copy()
+                smc_gradual_df["ConstraintType"] = "gradual"
             elif "range" in smc.lower():
                 smc_range_df = smc_combined_df.copy()
+                smc_range_df["ConstraintType"] = "range-based"
+            else:
+                # Try to infer from filename or ConstraintLevel
+                if "ConstraintType" not in smc_combined_df.columns:
+                    if "ConstraintLevel" in smc_combined_df.columns:
+                        smc_combined_df["ConstraintType"] = smc_combined_df["ConstraintLevel"].apply(
+                            lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
+                        )
     
     # Load SmileyLlama results (distinguish gradual vs range-based)
     smiley_gradual_df = pd.DataFrame()
@@ -545,25 +613,64 @@ def load_experiment_results(
         smiley_all = Path(results_dir) / "smiley_all_results.csv"
         smiley_gradual = Path(results_dir) / "smiley_gradual_results.csv"
         smiley_range = Path(results_dir) / "smiley_range_results.csv"
-        if smiley_all.exists():
+        
+        # Always try to load individual files first (they have all constraint levels)
+        individual_files = load_results_by_pattern(f"{results_dir}/smiley_*_*_results.csv", temperature)
+        if not individual_files.empty:
+            # Individual files loaded - split by ConstraintType
+            if "ConstraintType" in individual_files.columns:
+                smiley_gradual_df = individual_files[individual_files["ConstraintType"] == "gradual"].copy()
+                smiley_range_df = individual_files[individual_files["ConstraintType"] == "range-based"].copy()
+            smiley_combined_df = individual_files.copy()
+        elif smiley_all.exists():
             smiley_combined_df = load_results_file(str(smiley_all), temperature)
+            # Try to infer ConstraintType from ConstraintLevel
+            if "ConstraintType" not in smiley_combined_df.columns:
+                if "ConstraintLevel" in smiley_combined_df.columns:
+                    smiley_combined_df["ConstraintType"] = smiley_combined_df["ConstraintLevel"].apply(
+                        lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
+                    )
+            # Split into gradual and range-based
+            if "ConstraintType" in smiley_combined_df.columns:
+                smiley_gradual_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "gradual"].copy()
+                smiley_range_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "range-based"].copy()
         elif smiley_gradual.exists() or smiley_range.exists():
             if smiley_gradual.exists():
                 smiley_gradual_df = load_results_file(str(smiley_gradual), temperature)
+                smiley_gradual_df["ConstraintType"] = "gradual"
             if smiley_range.exists():
                 smiley_range_df = load_results_file(str(smiley_range), temperature)
+                smiley_range_df["ConstraintType"] = "range-based"
             smiley_combined_df = pd.concat([smiley_gradual_df, smiley_range_df], ignore_index=True) if not (smiley_gradual_df.empty and smiley_range_df.empty) else pd.DataFrame()
         else:
+            # Load all SmileyLlama files with pattern matching (fallback)
             smiley_combined_df = load_results_by_pattern(f"{results_dir}/smiley_*_results.csv", temperature)
+            # Split into gradual and range-based based on ConstraintType
+            if "ConstraintType" in smiley_combined_df.columns:
+                smiley_gradual_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "gradual"].copy()
+                smiley_range_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "range-based"].copy()
     else:
         if "*" in smiley:
             smiley_combined_df = load_results_by_pattern(smiley, temperature)
+            # Split into gradual and range-based based on ConstraintType
+            if "ConstraintType" in smiley_combined_df.columns:
+                smiley_gradual_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "gradual"].copy()
+                smiley_range_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "range-based"].copy()
         else:
             smiley_combined_df = load_results_file(smiley, temperature)
             if "gradual" in smiley.lower():
                 smiley_gradual_df = smiley_combined_df.copy()
+                smiley_gradual_df["ConstraintType"] = "gradual"
             elif "range" in smiley.lower():
                 smiley_range_df = smiley_combined_df.copy()
+                smiley_range_df["ConstraintType"] = "range-based"
+            else:
+                # Try to infer from filename or ConstraintLevel
+                if "ConstraintType" not in smiley_combined_df.columns:
+                    if "ConstraintLevel" in smiley_combined_df.columns:
+                        smiley_combined_df["ConstraintType"] = smiley_combined_df["ConstraintLevel"].apply(
+                            lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
+                        )
     
     return baseline_df, smc_gradual_df, smc_range_df, smiley_gradual_df, smiley_range_df, smc_combined_df, smiley_combined_df
 

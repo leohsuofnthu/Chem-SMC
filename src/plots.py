@@ -34,23 +34,48 @@ def plot_histograms(
     ref_df: Optional[pd.DataFrame] = None,
     dataset_label: str = "Reference",
 ) -> None:
-    """Plot property histograms for generated molecules (optional reference for comparison)."""
+    """Plot property histograms for generated molecules (optional reference for comparison) with improved styling."""
+    # Set style
+    plt.style.use('seaborn-v0_8-darkgrid' if 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
+    
+    # Color palette for models
+    model_colors = [
+        "#2E7D32", "#1976D2", "#F57C00", "#C62828", "#7B1FA2", 
+        "#00897B", "#E64A19", "#5D4037", "#455A64", "#D32F2F"
+    ]
+    
     for prop in properties:
-        plt.figure(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=(8, 5))
+        
         # Optional reference distribution
         if ref_df is not None:
             ref_vals = ref_df[prop].dropna()
             if not ref_vals.empty:
-                plt.hist(ref_vals, bins=50, density=True, alpha=0.35, label=f"{dataset_label} reference", color="#4C72B0")
+                ax.hist(ref_vals, bins=50, density=True, alpha=0.4, 
+                       label=f"{dataset_label} reference", color="#4C72B0", 
+                       edgecolor='white', linewidth=0.5, linestyle='--')
+        
         # Generated molecule distributions
+        color_idx = 0
         for label, frame in model_frames.items():
             vals = frame[prop].dropna()
             if vals.empty:
                 continue
-            plt.hist(vals, bins=50, density=True, alpha=0.35, label=label)
-        plt.xlabel(prop)
-        plt.ylabel("Density")
-        plt.legend()
+            color = model_colors[color_idx % len(model_colors)]
+            ax.hist(vals, bins=50, density=True, alpha=0.6, label=label,
+                   color=color, edgecolor='white', linewidth=0.5)
+            color_idx += 1
+        
+        ax.set_xlabel(prop, fontsize=12, fontweight='bold')
+        ax.set_ylabel("Density", fontsize=12, fontweight='bold')
+        ax.legend(loc='best', fontsize=9, framealpha=0.9)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color('#CCCCCC')
+        ax.spines["bottom"].set_color('#CCCCCC')
+        ax.tick_params(colors='#666666', labelsize=10)
+        
         plt.tight_layout()
         # Special handling for QED to match original filename
         if prop == "QED":
@@ -61,7 +86,7 @@ def plot_histograms(
             filename = f"{prop.lower()}_histogram.png"
             if ref_df is not None:
                 filename = f"{prop.lower()}_histogram_{dataset_label.lower()}.png"
-        plt.savefig(out_dir / filename, dpi=200)
+        plt.savefig(out_dir / filename, dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
 
 
@@ -71,57 +96,326 @@ def plot_qed(model_frames: Dict[str, pd.DataFrame], out_dir: Path, ref_df: Optio
     plot_histograms(model_frames, properties=["QED"], out_dir=out_dir, ref_df=ref_df, dataset_label=dataset_label)
 
 
+def plot_heatmap_comparison(panel_table: pd.DataFrame, out_dir: Path, filename: str = "metrics_heatmap.png") -> None:
+    """Create a beautiful heatmap showing all metrics across models and constraint levels."""
+    if panel_table.empty:
+        print("Warning: No panel table data to plot. Skipping heatmap.")
+        return
+    
+    # Set style
+    plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+    
+    # Prepare data for heatmap
+    metrics = ['Adherence %', 'Valid %', 'Distinct %', 'Diversity']
+    available_metrics = [m for m in metrics if m in panel_table.columns]
+    
+    if not available_metrics:
+        print("Warning: No metrics found in panel table. Skipping heatmap.")
+        return
+    
+    # Create model+type+level identifier
+    panel_table['ModelType'] = panel_table['Model'].astype(str)
+    if 'ConstraintType' in panel_table.columns:
+        panel_table['ModelType'] = panel_table['ModelType'] + ' (' + panel_table['ConstraintType'].astype(str) + ')'
+    
+    # Create a pivot table for each metric
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12))
+    fig.suptitle('Metrics Heatmap: Performance Across Models and Constraint Levels', 
+                 fontsize=16, fontweight='bold', y=0.995)
+    
+    level_order = ['loosen', 'loose', 'tight', 'ultra_tight']
+    level_labels = {'loosen': 'Loosen', 'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
+    
+    for idx, metric in enumerate(available_metrics[:4]):  # Max 4 metrics
+        ax = axes[idx // 2, idx % 2]
+        
+        # Create pivot table
+        pivot_data = panel_table.pivot_table(
+            values=metric,
+            index='ModelType',
+            columns='ConstraintLevel',
+            aggfunc='mean'
+        )
+        
+        # Reorder columns
+        existing_levels = [l for l in level_order if l in pivot_data.columns]
+        pivot_data = pivot_data[existing_levels]
+        
+        # Rename columns for better display
+        pivot_data.columns = [level_labels.get(col, col) for col in pivot_data.columns]
+        
+        # Create heatmap
+        im = ax.imshow(pivot_data.values, aspect='auto', cmap='RdYlGn', vmin=0, vmax=100 if '%' in metric else 1.0)
+        
+        # Set ticks and labels
+        ax.set_xticks(range(len(pivot_data.columns)))
+        ax.set_xticklabels(pivot_data.columns, fontsize=10, fontweight='bold')
+        ax.set_yticks(range(len(pivot_data.index)))
+        ax.set_yticklabels([mt.replace(' (gradual)', '\n(gradual)').replace(' (range-based)', '\n(range)') 
+                           for mt in pivot_data.index], fontsize=9)
+        
+        # Add text annotations
+        for i in range(len(pivot_data.index)):
+            for j in range(len(pivot_data.columns)):
+                value = pivot_data.iloc[i, j]
+                if not pd.isna(value):
+                    text_color = 'white' if value < 50 else 'black'
+                    ax.text(j, i, f'{value:.1f}', ha='center', va='center',
+                           color=text_color, fontsize=9, fontweight='bold')
+        
+        ax.set_title(metric, fontsize=12, fontweight='bold', pad=10)
+        ax.set_xlabel('Constraint Level', fontsize=11, fontweight='bold')
+        if idx % 2 == 0:
+            ax.set_ylabel('Model (Constraint Type)', fontsize=11, fontweight='bold')
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label(metric, fontsize=9, fontweight='bold')
+    
+    # Hide unused subplots
+    for idx in range(len(available_metrics), 4):
+        axes[idx // 2, idx % 2].axis('off')
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.98])
+    plt.savefig(out_dir / filename, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+
+def plot_constraint_level_comparison(panel_table: pd.DataFrame, out_dir: Path, filename: str = "constraint_level_comparison.png") -> None:
+    """Plot metrics comparison across constraint levels with beautiful styling."""
+    if panel_table.empty or "ConstraintLevel" not in panel_table.columns:
+        print("Warning: No constraint level data to plot. Skipping constraint level comparison.")
+        return
+    
+    # Set style
+    plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+    
+    # Prepare data: group by Model, ConstraintType, and ConstraintLevel
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Performance Metrics Across Constraint Levels', fontsize=16, fontweight='bold', y=0.995)
+    
+    # Define constraint level order
+    level_order = ['loosen', 'loose', 'tight', 'ultra_tight']
+    level_labels = {'loosen': 'Loosen', 'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
+    
+    # Color scheme: different colors for each model+type combination
+    model_colors = {
+        'GPT2-Zinc-87M': '#4C72B0',
+        'GPT2-Zinc-87M+SMC (gradual)': '#55A868',
+        'GPT2-Zinc-87M+SMC (range-based)': '#64B5CD',
+        'SmileyLlama-8B (gradual)': '#F57C00',
+        'SmileyLlama-8B (range-based)': '#FFB74D',
+    }
+    
+    metrics_to_plot = [
+        ('Adherence %', axes[0, 0], 0, 110),
+        ('Valid %', axes[0, 1], 0, 110),
+        ('Distinct %', axes[1, 0], 0, 110),
+        ('Diversity', axes[1, 1], 0.8, 1.0),
+    ]
+    
+    for metric_name, ax, y_min, y_max in metrics_to_plot:
+        if metric_name not in panel_table.columns:
+            ax.axis('off')
+            continue
+        
+        # Create model+type identifier (create a copy to avoid modifying original)
+        plot_data = panel_table.copy()
+        plot_data['ModelType'] = plot_data['Model'].astype(str)
+        if 'ConstraintType' in plot_data.columns:
+            plot_data['ModelType'] = plot_data['ModelType'] + ' (' + plot_data['ConstraintType'].astype(str) + ')'
+        
+        # Plot each model+type combination
+        x_positions = {}
+        x_pos = 0
+        for model_type in sorted(plot_data['ModelType'].unique()):
+            x_positions[model_type] = x_pos
+            x_pos += 1
+        
+        width = 0.18
+        level_x_offsets = {'loosen': -1.5*width, 'loose': -0.5*width, 'tight': 0.5*width, 'ultra_tight': 1.5*width}
+        level_colors = {'loosen': '#90EE90', 'loose': '#87CEEB', 'tight': '#FFA500', 'ultra_tight': '#FF6347'}
+        
+        # Track which levels we've plotted for legend
+        legend_added = set()
+        
+        for model_type in sorted(plot_data['ModelType'].unique()):
+            model_data = plot_data[plot_data['ModelType'] == model_type]
+            base_x = x_positions[model_type]
+            
+            for level in level_order:
+                level_data = model_data[model_data['ConstraintLevel'] == level]
+                if not level_data.empty:
+                    value = level_data[metric_name].iloc[0]
+                    color = level_colors.get(level, '#999999')
+                    offset = level_x_offsets.get(level, 0)
+                    
+                    label = f'{level_labels[level]}' if level not in legend_added else ''
+                    if label:
+                        legend_added.add(level)
+                    
+                    bar = ax.bar(base_x + offset, value, width=width, 
+                                color=color, alpha=0.85, edgecolor='white', linewidth=1.5,
+                                label=label)
+                    
+                    # Add value label
+                    ax.text(base_x + offset, value + (y_max - y_min) * 0.015,
+                           f'{value:.1f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
+        
+        ax.set_ylabel(metric_name, fontsize=12, fontweight='bold')
+        ax.set_ylim(y_min, y_max)
+        ax.set_xticks(list(x_positions.values()))
+        ax.set_xticklabels([mt.replace(' (gradual)', '\n(gradual)').replace(' (range-based)', '\n(range)') 
+                           for mt in sorted(x_positions.keys())], 
+                          rotation=0, ha='center', fontsize=9)
+        ax.grid(axis='y', alpha=0.3, linestyle='--', zorder=0)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color('#CCCCCC')
+        ax.spines["bottom"].set_color('#CCCCCC')
+        ax.tick_params(colors='#666666', labelsize=10)
+        
+        # Add legend for constraint levels (only on first subplot)
+        if metric_name == 'Adherence %':
+            handles, labels = ax.get_legend_handles_labels()
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_handles = []
+            unique_labels = []
+            for h, l in zip(handles, labels):
+                if l not in seen:
+                    seen.add(l)
+                    unique_handles.append(h)
+                    unique_labels.append(l)
+            ax.legend(unique_handles, unique_labels, loc='upper left', fontsize=9, 
+                     framealpha=0.95, title='Constraint Level', title_fontsize=10,
+                     edgecolor='#CCCCCC', fancybox=True)
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.98])
+    plt.savefig(out_dir / filename, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+
 def plot_bars(metrics: pd.DataFrame, out_dir: Path, filename: str = "model_bars.png") -> None:
-    """Plot bar charts for the 4 core constraint-based metrics."""
+    """Plot bar charts for the 4 core constraint-based metrics with improved styling."""
     if metrics.empty:
         print("Warning: No metrics data to plot. Skipping bar chart.")
         return
     
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4), sharey=False)
+    # Set style
+    plt.style.use('seaborn-v0_8-darkgrid' if 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
+    
+    fig, axes = plt.subplots(1, 4, figsize=(22, 6), sharey=False)
+    fig.suptitle('Model Performance Comparison', fontsize=16, fontweight='bold', y=1.02)
     metrics = metrics.copy()
+    
+    # Create labels with better formatting
     labels = metrics["Model"].tolist()
+    # Truncate long labels and add line breaks if needed
+    formatted_labels = []
+    for label in labels:
+        if len(label) > 20:
+            # Try to break at natural points
+            if "(" in label:
+                parts = label.split("(")
+                if len(parts) == 2:
+                    formatted_labels.append(f"{parts[0]}\n({parts[1]}")
+                else:
+                    formatted_labels.append(label[:20] + "...")
+            else:
+                formatted_labels.append(label[:20] + "...")
+        else:
+            formatted_labels.append(label)
+    
+    # Color palette - modern, accessible colors
+    colors = {
+        "Adherence %": "#2E7D32",  # Green
+        "Valid %": "#1976D2",       # Blue
+        "Distinct %": "#F57C00",    # Orange
+        "Diversity": "#C62828",     # Red
+    }
     
     # Adherence % (most important for constraint-based generation)
     if "Adherence %" in metrics.columns:
-        axes[0].bar(labels, metrics["Adherence %"], color="#55A868")
-        axes[0].set_title("Adherence %", fontweight="bold")
+        bars = axes[0].bar(range(len(labels)), metrics["Adherence %"], 
+                          color=colors["Adherence %"], alpha=0.85, edgecolor='white', linewidth=1.5)
+        axes[0].set_title("Adherence %", fontweight="bold", fontsize=14, pad=10)
         axes[0].set_ylim(0, 110)
-        axes[0].tick_params(axis="x", rotation=20)
+        axes[0].set_xticks(range(len(labels)))
+        axes[0].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[0].set_ylabel("Percentage (%)", fontsize=11)
+        axes[0].grid(axis='y', alpha=0.3, linestyle='--')
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, metrics["Adherence %"])):
+            height = bar.get_height()
+            axes[0].text(bar.get_x() + bar.get_width()/2., height + 1,
+                        f'{val:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
     else:
         axes[0].axis("off")
     
     # Valid %
     if "Valid %" in metrics.columns:
-        axes[1].bar(labels, metrics["Valid %"], color="#4C72B0")
-        axes[1].set_title("Validity %")
+        bars = axes[1].bar(range(len(labels)), metrics["Valid %"], 
+                          color=colors["Valid %"], alpha=0.85, edgecolor='white', linewidth=1.5)
+        axes[1].set_title("Validity %", fontweight="bold", fontsize=14, pad=10)
         axes[1].set_ylim(0, 110)
-        axes[1].tick_params(axis="x", rotation=20)
+        axes[1].set_xticks(range(len(labels)))
+        axes[1].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[1].set_ylabel("Percentage (%)", fontsize=11)
+        axes[1].grid(axis='y', alpha=0.3, linestyle='--')
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, metrics["Valid %"])):
+            height = bar.get_height()
+            axes[1].text(bar.get_x() + bar.get_width()/2., height + 1,
+                        f'{val:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
     else:
         axes[1].axis("off")
     
     # Distinct %
     if "Distinct %" in metrics.columns:
-        axes[2].bar(labels, metrics["Distinct %"], color="#DD8452")
-        axes[2].set_title("Distinct %")
+        bars = axes[2].bar(range(len(labels)), metrics["Distinct %"], 
+                          color=colors["Distinct %"], alpha=0.85, edgecolor='white', linewidth=1.5)
+        axes[2].set_title("Distinct %", fontweight="bold", fontsize=14, pad=10)
         axes[2].set_ylim(0, 110)
-        axes[2].tick_params(axis="x", rotation=20)
+        axes[2].set_xticks(range(len(labels)))
+        axes[2].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[2].set_ylabel("Percentage (%)", fontsize=11)
+        axes[2].grid(axis='y', alpha=0.3, linestyle='--')
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, metrics["Distinct %"])):
+            height = bar.get_height()
+            axes[2].text(bar.get_x() + bar.get_width()/2., height + 1,
+                        f'{val:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
     else:
         axes[2].axis("off")
 
     # Diversity
     if "Diversity" in metrics.columns:
-        axes[3].bar(labels, metrics["Diversity"], color="#C44E52")
-        axes[3].set_title("Diversity (1 - mean Tanimoto)")
-        axes[3].tick_params(axis="x", rotation=20)
+        bars = axes[3].bar(range(len(labels)), metrics["Diversity"], 
+                          color=colors["Diversity"], alpha=0.85, edgecolor='white', linewidth=1.5)
+        axes[3].set_title("Diversity\n(1 - mean Tanimoto)", fontweight="bold", fontsize=14, pad=10)
+        axes[3].set_xticks(range(len(labels)))
+        axes[3].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[3].set_ylabel("Diversity Score", fontsize=11)
+        axes[3].grid(axis='y', alpha=0.3, linestyle='--')
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, metrics["Diversity"])):
+            height = bar.get_height()
+            axes[3].text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                        f'{val:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
     else:
         axes[3].axis("off")
 
+    # Improve overall appearance
     for ax in axes:
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color('#CCCCCC')
+        ax.spines["bottom"].set_color('#CCCCCC')
+        ax.tick_params(colors='#666666', labelsize=10)
 
-    plt.tight_layout()
-    plt.savefig(out_dir / filename, dpi=200)
+    plt.tight_layout(pad=2.0)
+    plt.savefig(out_dir / filename, dpi=300, bbox_inches='tight', facecolor='white')
     plt.close()
 
 
@@ -382,10 +676,20 @@ Examples:
     
     # Plot bar charts
     plot_bars(metrics, fig_dir, filename="model_bars.png")
+    
+    # Load panel table for constraint level comparison
+    panel_table_path = Path(results_dir) / "panel_table.csv"
+    if panel_table_path.exists():
+        panel_table = pd.read_csv(panel_table_path)
+        plot_constraint_level_comparison(panel_table, fig_dir, filename="constraint_level_comparison.png")
+        plot_heatmap_comparison(panel_table, fig_dir, filename="metrics_heatmap.png")
+    
     print(f"\nSaved plots to {fig_dir}/")
     print("  - Property histograms (MW, logP, TPSA)")
     print("  - QED distribution")
     print("  - Model comparison bars (Adherence, Valid, Distinct, Diversity)")
+    print("  - Constraint level comparison (across all levels)")
+    print("  - Metrics heatmap (visual summary)")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+Model,ConstraintType,ConstraintLevel,Prompt,Adherence %,Valid %,Distinct %,Diversity
+GPT2-Zinc-87M,range-based,loose,multi_prefix,52.2,69.1,60.4,0.8748650695753484
+GPT2-Zinc-87M,range-based,tight,multi_prefix,14.7,69.1,60.4,0.8748650695753484
+GPT2-Zinc-87M,range-based,ultra_tight,multi_prefix,0.5,69.1,60.4,0.8748650695753484
+GPT2-Zinc-87M+SMC,gradual,loosen,multi_prefix_smc,94.33962264150944,100.0,100.0,0.9016533169051396
+GPT2-Zinc-87M+SMC,gradual,tight,multi_prefix_smc,86.98224852071006,100.0,100.0,0.9043854881153912
+GPT2-Zinc-87M+SMC,gradual,ultra_tight,multi_prefix_smc,79.02097902097903,100.0,100.0,0.9047964645550692
+GPT2-Zinc-87M+SMC,range-based,loose,multi_prefix_smc,60.0,100.0,100.0,0.901922987036841
+GPT2-Zinc-87M+SMC,range-based,tight,multi_prefix_smc,11.65644171779141,100.0,100.0,0.9027855919319369
+GPT2-Zinc-87M+SMC,range-based,ultra_tight,multi_prefix_smc,0.7490636704119851,100.0,100.0,0.8975574458671427
+SmileyLlama-8B,gradual,loosen,gradual_loosen,87.5,100.0,100.0,0.8726147460056064
+SmileyLlama-8B,gradual,tight,gradual_tight,77.10000000000001,100.0,100.0,0.8725467798101335
+SmileyLlama-8B,gradual,ultra_tight,gradual_ultra_tight,53.300000000000004,100.0,100.0,0.8715595864638507
+SmileyLlama-8B,range-based,loose,mw_logp_rotb,27.900000000000002,100.0,100.0,0.8809667640104522
+SmileyLlama-8B,range-based,tight,mw_logp_rotb_tight,2.3,100.0,100.0,0.8892924412381074
+SmileyLlama-8B,range-based,ultra_tight,mw_logp_rotb_ultra_tight,0.5,100.0,100.0,0.8930908190677358
