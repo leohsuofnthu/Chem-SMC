@@ -8,6 +8,7 @@ or combined files if available.
 from __future__ import annotations
 
 import argparse
+import glob
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -71,11 +72,12 @@ def summarise_group(df: pd.DataFrame) -> pd.Series:
     """
     Summarize constraint-based generation metrics.
     
-    Focuses on 4 core metrics for controlled generation:
+    Focuses on core metrics for controlled generation:
     1. Adherence % - Percentage of molecules meeting property constraints
     2. Valid % - Percentage of valid SMILES
     3. Distinct % - Percentage of unique molecules
     4. Diversity - Tanimoto diversity (1 - mean similarity)
+    5. QED - Mean QED (Quantitative Estimate of Drug-likeness) for valid molecules
     """
     total = len(df)
     valid_df = filter_valid_molecules(df)
@@ -84,13 +86,100 @@ def summarise_group(df: pd.DataFrame) -> pd.Series:
         "Valid %": 100.0 * df["Valid"].mean() if total else 0.0,
         "Distinct %": 100.0 * valid_df["SMILES"].nunique() / total if total else 0.0,
         "Diversity": tanimoto_diversity(valid_df["SMILES"]) if not valid_df.empty else 0.0,
+        "QED": valid_df["QED"].mean() if not valid_df.empty and "QED" in valid_df.columns else 0.0,
     }
     return pd.Series(metrics)
+
+
+def load_runtime_data(results_dir: str = "results") -> pd.DataFrame:
+    """
+    Load runtime data from all summary files and combine into a single dataframe.
+    
+    Returns:
+        DataFrame with Model, ConstraintLevel, ConstraintType, Prompt, and Runtime columns
+    """
+    
+    summary_files = glob.glob(str(Path(results_dir) / "*_summary.csv"))
+    if not summary_files:
+        return pd.DataFrame()
+    
+    runtime_rows = []
+    for summary_file in summary_files:
+        try:
+            summary_df = pd.read_csv(summary_file)
+            # Check if runtime columns exist
+            if "Runtime_formatted" in summary_df.columns or "Runtime_seconds" in summary_df.columns:
+                # Extract model, constraint level, and type from filename
+                filename = Path(summary_file).stem
+                
+                # Determine model from filename
+                if "baseline" in filename:
+                    model = "GPT2-Zinc-87M"
+                    constraint_type = "range-based"
+                elif "smc" in filename:
+                    model = "GPT2-Zinc-87M+SMC"
+                    if "gradual" in filename:
+                        constraint_type = "gradual"
+                    else:
+                        constraint_type = "range-based"
+                elif "smiley" in filename:
+                    model = "SmileyLlama-8B"
+                    if "gradual" in filename:
+                        constraint_type = "gradual"
+                    else:
+                        constraint_type = "range-based"
+                else:
+                    continue
+                
+                # Extract constraint level from filename
+                # Check longer/more specific strings first to avoid substring matches
+                constraint_level = None
+                for level in ["ultra_tight", "loosen", "loose", "tight"]:
+                    if level in filename:
+                        constraint_level = level
+                        break
+                
+                if constraint_level is None:
+                    continue
+                
+                # Get runtime data from summary
+                for _, row in summary_df.iterrows():
+                    runtime_row = {
+                        "Model": model,
+                        "ConstraintType": constraint_type,
+                        "ConstraintLevel": constraint_level,
+                        "Prompt": row.get("Prompt", ""),
+                    }
+                    
+                    # Handle temperature - convert to float if present, or use None
+                    temp = row.get("Temperature", None)
+                    if temp is not None and pd.notna(temp):
+                        try:
+                            runtime_row["Temperature"] = float(temp)
+                        except (ValueError, TypeError):
+                            runtime_row["Temperature"] = None
+                    else:
+                        runtime_row["Temperature"] = None
+                    
+                    # Add runtime formatted column if available
+                    if "Runtime_formatted" in row and pd.notna(row.get("Runtime_formatted")):
+                        runtime_row["Runtime_formatted"] = str(row["Runtime_formatted"])
+                    
+                    runtime_rows.append(runtime_row)
+        except Exception as e:
+            # Skip files that can't be read
+            continue
+    
+    if not runtime_rows:
+        return pd.DataFrame()
+    
+    return pd.DataFrame(runtime_rows)
 
 
 def build_tables(
     combined: pd.DataFrame,
     temperature_filter: Optional[float] = None,
+    results_dir: str = "results",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build evaluation tables focusing on constraint-based metrics.
@@ -151,7 +240,7 @@ def build_tables(
             summary[col] = value
         summary_rows.append(summary)
     summary_table = pd.DataFrame(summary_rows)
-    summary_table = summary_table[group_cols + ["Adherence %", "Valid %", "Distinct %", "Diversity"]]
+    summary_table = summary_table[group_cols + ["Adherence %", "Valid %", "Distinct %", "Diversity", "QED"]]
 
     # Panel table groups by Model, ConstraintType (if available), ConstraintLevel (if available), and Prompt
     panel_rows: List[pd.Series] = []
@@ -172,7 +261,38 @@ def build_tables(
             summary[col] = value
         panel_rows.append(summary)
     panel_table = pd.DataFrame(panel_rows)
-    panel_table = panel_table[panel_group_cols + ["Adherence %", "Valid %", "Distinct %", "Diversity"]]
+    panel_table = panel_table[panel_group_cols + ["Adherence %", "Valid %", "Distinct %", "Diversity", "QED"]]
+    
+    # Merge runtime data from summary files
+    runtime_df = load_runtime_data(results_dir)
+    if not runtime_df.empty:
+        # Merge on Model, ConstraintType, ConstraintLevel, and Prompt
+        merge_cols = ["Model"]
+        if "ConstraintType" in panel_table.columns and "ConstraintType" in runtime_df.columns:
+            merge_cols.append("ConstraintType")
+        if "ConstraintLevel" in panel_table.columns and "ConstraintLevel" in runtime_df.columns:
+            merge_cols.append("ConstraintLevel")
+        if "Prompt" in panel_table.columns and "Prompt" in runtime_df.columns:
+            merge_cols.append("Prompt")
+        if "Temperature" in panel_table.columns and "Temperature" in runtime_df.columns:
+            merge_cols.append("Temperature")
+        
+        # Merge runtime data (only Runtime_formatted)
+        # Don't use Temperature as merge key since panel_table doesn't include it
+        if "Runtime_formatted" in runtime_df.columns:
+            merge_cols_final = [c for c in merge_cols if c != "Temperature"]
+            panel_table = panel_table.merge(
+                runtime_df[merge_cols_final + ["Runtime_formatted"]],
+                on=merge_cols_final,
+                how="left"
+            )
+            
+            # Reorder columns to put runtime at the end
+            metric_cols = ["Adherence %", "Valid %", "Distinct %", "Diversity", "QED"]
+            other_cols = [col for col in panel_table.columns 
+                         if col not in panel_group_cols + metric_cols + ["Runtime_formatted"]]
+            panel_table = panel_table[panel_group_cols + metric_cols + other_cols + ["Runtime_formatted"]]
+    
     return summary_table.sort_values(group_cols), panel_table.sort_values(panel_group_cols)
 
 
@@ -280,7 +400,7 @@ Examples:
     print(f"Total molecules: {len(combined)}")
     print(f"Valid molecules: {combined['Valid'].sum() if 'Valid' in combined.columns else 'N/A'}")
     
-    summary_table, panel_table = build_tables(combined, temperature_filter=args.temperature)
+    summary_table, panel_table = build_tables(combined, temperature_filter=args.temperature, results_dir=results_dir)
     
     # Save tables
     summary_path = Path(args.summary_table)

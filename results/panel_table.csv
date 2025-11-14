@@ -1,16 +1,16 @@
-Model,ConstraintType,ConstraintLevel,Prompt,Adherence %,Valid %,Distinct %,Diversity
-GPT2-Zinc-87M,range-based,loose,multi_prefix,52.2,69.1,60.4,0.8748650695753484
-GPT2-Zinc-87M,range-based,tight,multi_prefix,14.7,69.1,60.4,0.8748650695753484
-GPT2-Zinc-87M,range-based,ultra_tight,multi_prefix,0.5,69.1,60.4,0.8748650695753484
-GPT2-Zinc-87M+SMC,gradual,loosen,multi_prefix_smc,94.33962264150944,100.0,100.0,0.9016533169051396
-GPT2-Zinc-87M+SMC,gradual,tight,multi_prefix_smc,86.98224852071006,100.0,100.0,0.9043854881153912
-GPT2-Zinc-87M+SMC,gradual,ultra_tight,multi_prefix_smc,79.02097902097903,100.0,100.0,0.9047964645550692
-GPT2-Zinc-87M+SMC,range-based,loose,multi_prefix_smc,60.0,100.0,100.0,0.901922987036841
-GPT2-Zinc-87M+SMC,range-based,tight,multi_prefix_smc,11.65644171779141,100.0,100.0,0.9027855919319369
-GPT2-Zinc-87M+SMC,range-based,ultra_tight,multi_prefix_smc,0.7490636704119851,100.0,100.0,0.8975574458671427
-SmileyLlama-8B,gradual,loosen,gradual_loosen,87.5,100.0,100.0,0.8726147460056064
-SmileyLlama-8B,gradual,tight,gradual_tight,77.10000000000001,100.0,100.0,0.8725467798101335
-SmileyLlama-8B,gradual,ultra_tight,gradual_ultra_tight,53.300000000000004,100.0,100.0,0.8715595864638507
-SmileyLlama-8B,range-based,loose,mw_logp_rotb,27.900000000000002,100.0,100.0,0.8809667640104522
-SmileyLlama-8B,range-based,tight,mw_logp_rotb_tight,2.3,100.0,100.0,0.8892924412381074
-SmileyLlama-8B,range-based,ultra_tight,mw_logp_rotb_ultra_tight,0.5,100.0,100.0,0.8930908190677358
+Model,ConstraintType,ConstraintLevel,Prompt,Adherence %,Valid %,Distinct %,Diversity,QED,Runtime_formatted
+GPT2-Zinc-87M,range-based,loose,multi_prefix,52.2,69.1,60.4,0.8748650695753484,0.717393918617363,0m 18s
+GPT2-Zinc-87M,range-based,tight,multi_prefix,14.7,69.1,60.4,0.8748650695753484,0.717393918617363,0m 13s
+GPT2-Zinc-87M,range-based,ultra_tight,multi_prefix,0.5,69.1,60.4,0.8748650695753484,0.717393918617363,0m 13s
+GPT2-Zinc-87M+SMC,gradual,loosen,multi_prefix_smc,94.33962264150944,100.0,100.0,0.9016533169051396,0.5372585023088904,5m 10s
+GPT2-Zinc-87M+SMC,gradual,tight,multi_prefix_smc,86.98224852071006,100.0,100.0,0.9043854881153912,0.5711759190577625,3m 26s
+GPT2-Zinc-87M+SMC,gradual,ultra_tight,multi_prefix_smc,79.02097902097903,100.0,100.0,0.9047964645550692,0.5218803072218612,5m 28s
+GPT2-Zinc-87M+SMC,range-based,loose,multi_prefix_smc,60.0,100.0,100.0,0.901922987036841,0.6098075148042675,3m 43s
+GPT2-Zinc-87M+SMC,range-based,tight,multi_prefix_smc,11.65644171779141,100.0,100.0,0.9027855919319369,0.6420888133033527,3m 52s
+GPT2-Zinc-87M+SMC,range-based,ultra_tight,multi_prefix_smc,0.7490636704119851,100.0,100.0,0.8975574458671427,0.7206834130233559,4m 40s
+SmileyLlama-8B,gradual,loosen,gradual_loosen,87.5,100.0,100.0,0.8726147460056064,0.6388869602841571,5m 33s
+SmileyLlama-8B,gradual,tight,gradual_tight,77.10000000000001,100.0,100.0,0.8725467798101335,0.6990905242984663,3m 59s
+SmileyLlama-8B,gradual,ultra_tight,gradual_ultra_tight,53.300000000000004,100.0,100.0,0.8715595864638507,0.7295054850446299,3m 58s
+SmileyLlama-8B,range-based,loose,mw_logp_rotb,27.900000000000002,100.0,100.0,0.8809667640104522,0.2651993750702948,9m 50s
+SmileyLlama-8B,range-based,tight,mw_logp_rotb_tight,2.3,100.0,100.0,0.8892924412381074,0.30031128690918213,9m 49s
+SmileyLlama-8B,range-based,ultra_tight,mw_logp_rotb_ultra_tight,0.5,100.0,100.0,0.8930908190677358,0.4332749148287317,7m 44s

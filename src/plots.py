@@ -106,7 +106,7 @@ def plot_heatmap_comparison(panel_table: pd.DataFrame, out_dir: Path, filename: 
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
     # Prepare data for heatmap
-    metrics = ['Adherence %', 'Valid %', 'Distinct %', 'Diversity']
+    metrics = ['Adherence %', 'Valid %', 'Distinct %', 'Diversity', 'QED']
     available_metrics = [m for m in metrics if m in panel_table.columns]
     
     if not available_metrics:
@@ -190,10 +190,6 @@ def plot_constraint_level_comparison(panel_table: pd.DataFrame, out_dir: Path, f
     # Set style
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
-    # Prepare data: group by Model, ConstraintType, and ConstraintLevel
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Performance Metrics Across Constraint Levels', fontsize=16, fontweight='bold', y=0.995)
-    
     # Define constraint level order
     level_order = ['loosen', 'loose', 'tight', 'ultra_tight']
     level_labels = {'loosen': 'Loosen', 'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
@@ -207,12 +203,44 @@ def plot_constraint_level_comparison(panel_table: pd.DataFrame, out_dir: Path, f
         'SmileyLlama-8B (range-based)': '#FFB74D',
     }
     
-    metrics_to_plot = [
-        ('Adherence %', axes[0, 0], 0, 110),
-        ('Valid %', axes[0, 1], 0, 110),
-        ('Distinct %', axes[1, 0], 0, 110),
-        ('Diversity', axes[1, 1], 0.8, 1.0),
-    ]
+    # Determine layout based on available metrics
+    has_diversity = 'Diversity' in panel_table.columns
+    has_qed = 'QED' in panel_table.columns
+    
+    if has_diversity and has_qed:
+        # 2x3 layout for all 5 metrics
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+        metrics_to_plot = [
+            ('Adherence %', axes[0, 0], 0, 110),
+            ('Valid %', axes[0, 1], 0, 110),
+            ('Distinct %', axes[0, 2], 0, 110),
+            ('Diversity', axes[1, 0], 0.8, 1.0),
+            ('QED', axes[1, 1], 0, 1.0),
+        ]
+        axes[1, 2].axis('off')
+    elif has_diversity or has_qed:
+        # 2x2 layout for 4 metrics
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        metrics_to_plot = [
+            ('Adherence %', axes[0, 0], 0, 110),
+            ('Valid %', axes[0, 1], 0, 110),
+            ('Distinct %', axes[1, 0], 0, 110),
+        ]
+        if has_diversity:
+            metrics_to_plot.append(('Diversity', axes[1, 1], 0.8, 1.0))
+        elif has_qed:
+            metrics_to_plot.append(('QED', axes[1, 1], 0, 1.0))
+    else:
+        # 2x2 layout for 3 metrics
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        metrics_to_plot = [
+            ('Adherence %', axes[0, 0], 0, 110),
+            ('Valid %', axes[0, 1], 0, 110),
+            ('Distinct %', axes[1, 0], 0, 110),
+        ]
+        axes[1, 1].axis('off')
+    
+    fig.suptitle('Performance Metrics Across Constraint Levels', fontsize=16, fontweight='bold', y=0.995)
     
     for metric_name, ax, y_min, y_max in metrics_to_plot:
         if metric_name not in panel_table.columns:
@@ -297,7 +325,7 @@ def plot_constraint_level_comparison(panel_table: pd.DataFrame, out_dir: Path, f
 
 
 def plot_bars(metrics: pd.DataFrame, out_dir: Path, filename: str = "model_bars.png") -> None:
-    """Plot bar charts for the 4 core constraint-based metrics with improved styling."""
+    """Plot bar charts for the core constraint-based metrics with improved styling."""
     if metrics.empty:
         print("Warning: No metrics data to plot. Skipping bar chart.")
         return
@@ -305,7 +333,27 @@ def plot_bars(metrics: pd.DataFrame, out_dir: Path, filename: str = "model_bars.
     # Set style
     plt.style.use('seaborn-v0_8-darkgrid' if 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
     
-    fig, axes = plt.subplots(1, 4, figsize=(22, 6), sharey=False)
+    # Determine number of subplots based on available metrics
+    available_metrics = []
+    if "Adherence %" in metrics.columns:
+        available_metrics.append("Adherence %")
+    if "Valid %" in metrics.columns:
+        available_metrics.append("Valid %")
+    if "Distinct %" in metrics.columns:
+        available_metrics.append("Distinct %")
+    if "Diversity" in metrics.columns:
+        available_metrics.append("Diversity")
+    if "QED" in metrics.columns:
+        available_metrics.append("QED")
+    
+    n_plots = len(available_metrics)
+    if n_plots == 0:
+        print("Warning: No metrics found to plot. Skipping bar chart.")
+        return
+    
+    fig, axes = plt.subplots(1, n_plots, figsize=(6 * n_plots, 6), sharey=False)
+    if n_plots == 1:
+        axes = [axes]  # Make it iterable
     fig.suptitle('Model Performance Comparison', fontsize=16, fontweight='bold', y=1.02)
     metrics = metrics.copy()
     
@@ -333,78 +381,94 @@ def plot_bars(metrics: pd.DataFrame, out_dir: Path, filename: str = "model_bars.
         "Valid %": "#1976D2",       # Blue
         "Distinct %": "#F57C00",    # Orange
         "Diversity": "#C62828",     # Red
+        "QED": "#7B1FA2",           # Purple
     }
+    
+    # Plot available metrics in order
+    ax_idx = 0
     
     # Adherence % (most important for constraint-based generation)
     if "Adherence %" in metrics.columns:
-        bars = axes[0].bar(range(len(labels)), metrics["Adherence %"], 
+        bars = axes[ax_idx].bar(range(len(labels)), metrics["Adherence %"], 
                           color=colors["Adherence %"], alpha=0.85, edgecolor='white', linewidth=1.5)
-        axes[0].set_title("Adherence %", fontweight="bold", fontsize=14, pad=10)
-        axes[0].set_ylim(0, 110)
-        axes[0].set_xticks(range(len(labels)))
-        axes[0].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
-        axes[0].set_ylabel("Percentage (%)", fontsize=11)
-        axes[0].grid(axis='y', alpha=0.3, linestyle='--')
+        axes[ax_idx].set_title("Adherence %", fontweight="bold", fontsize=14, pad=10)
+        axes[ax_idx].set_ylim(0, 110)
+        axes[ax_idx].set_xticks(range(len(labels)))
+        axes[ax_idx].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[ax_idx].set_ylabel("Percentage (%)", fontsize=11)
+        axes[ax_idx].grid(axis='y', alpha=0.3, linestyle='--')
         # Add value labels on bars
         for i, (bar, val) in enumerate(zip(bars, metrics["Adherence %"])):
             height = bar.get_height()
-            axes[0].text(bar.get_x() + bar.get_width()/2., height + 1,
+            axes[ax_idx].text(bar.get_x() + bar.get_width()/2., height + 1,
                         f'{val:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
-    else:
-        axes[0].axis("off")
+        ax_idx += 1
     
     # Valid %
     if "Valid %" in metrics.columns:
-        bars = axes[1].bar(range(len(labels)), metrics["Valid %"], 
+        bars = axes[ax_idx].bar(range(len(labels)), metrics["Valid %"], 
                           color=colors["Valid %"], alpha=0.85, edgecolor='white', linewidth=1.5)
-        axes[1].set_title("Validity %", fontweight="bold", fontsize=14, pad=10)
-        axes[1].set_ylim(0, 110)
-        axes[1].set_xticks(range(len(labels)))
-        axes[1].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
-        axes[1].set_ylabel("Percentage (%)", fontsize=11)
-        axes[1].grid(axis='y', alpha=0.3, linestyle='--')
+        axes[ax_idx].set_title("Validity %", fontweight="bold", fontsize=14, pad=10)
+        axes[ax_idx].set_ylim(0, 110)
+        axes[ax_idx].set_xticks(range(len(labels)))
+        axes[ax_idx].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[ax_idx].set_ylabel("Percentage (%)", fontsize=11)
+        axes[ax_idx].grid(axis='y', alpha=0.3, linestyle='--')
         # Add value labels on bars
         for i, (bar, val) in enumerate(zip(bars, metrics["Valid %"])):
             height = bar.get_height()
-            axes[1].text(bar.get_x() + bar.get_width()/2., height + 1,
+            axes[ax_idx].text(bar.get_x() + bar.get_width()/2., height + 1,
                         f'{val:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
-    else:
-        axes[1].axis("off")
+        ax_idx += 1
     
     # Distinct %
     if "Distinct %" in metrics.columns:
-        bars = axes[2].bar(range(len(labels)), metrics["Distinct %"], 
+        bars = axes[ax_idx].bar(range(len(labels)), metrics["Distinct %"], 
                           color=colors["Distinct %"], alpha=0.85, edgecolor='white', linewidth=1.5)
-        axes[2].set_title("Distinct %", fontweight="bold", fontsize=14, pad=10)
-        axes[2].set_ylim(0, 110)
-        axes[2].set_xticks(range(len(labels)))
-        axes[2].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
-        axes[2].set_ylabel("Percentage (%)", fontsize=11)
-        axes[2].grid(axis='y', alpha=0.3, linestyle='--')
+        axes[ax_idx].set_title("Distinct %", fontweight="bold", fontsize=14, pad=10)
+        axes[ax_idx].set_ylim(0, 110)
+        axes[ax_idx].set_xticks(range(len(labels)))
+        axes[ax_idx].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[ax_idx].set_ylabel("Percentage (%)", fontsize=11)
+        axes[ax_idx].grid(axis='y', alpha=0.3, linestyle='--')
         # Add value labels on bars
         for i, (bar, val) in enumerate(zip(bars, metrics["Distinct %"])):
             height = bar.get_height()
-            axes[2].text(bar.get_x() + bar.get_width()/2., height + 1,
+            axes[ax_idx].text(bar.get_x() + bar.get_width()/2., height + 1,
                         f'{val:.1f}%', ha='center', va='bottom', fontsize=8, fontweight='bold')
-    else:
-        axes[2].axis("off")
+        ax_idx += 1
 
     # Diversity
     if "Diversity" in metrics.columns:
-        bars = axes[3].bar(range(len(labels)), metrics["Diversity"], 
+        bars = axes[ax_idx].bar(range(len(labels)), metrics["Diversity"], 
                           color=colors["Diversity"], alpha=0.85, edgecolor='white', linewidth=1.5)
-        axes[3].set_title("Diversity\n(1 - mean Tanimoto)", fontweight="bold", fontsize=14, pad=10)
-        axes[3].set_xticks(range(len(labels)))
-        axes[3].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
-        axes[3].set_ylabel("Diversity Score", fontsize=11)
-        axes[3].grid(axis='y', alpha=0.3, linestyle='--')
+        axes[ax_idx].set_title("Diversity\n(1 - mean Tanimoto)", fontweight="bold", fontsize=14, pad=10)
+        axes[ax_idx].set_xticks(range(len(labels)))
+        axes[ax_idx].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[ax_idx].set_ylabel("Diversity Score", fontsize=11)
+        axes[ax_idx].grid(axis='y', alpha=0.3, linestyle='--')
         # Add value labels on bars
         for i, (bar, val) in enumerate(zip(bars, metrics["Diversity"])):
             height = bar.get_height()
-            axes[3].text(bar.get_x() + bar.get_width()/2., height + 0.01,
+            axes[ax_idx].text(bar.get_x() + bar.get_width()/2., height + 0.01,
                         f'{val:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
-    else:
-        axes[3].axis("off")
+        ax_idx += 1
+
+    # QED
+    if "QED" in metrics.columns:
+        bars = axes[ax_idx].bar(range(len(labels)), metrics["QED"], 
+                          color=colors["QED"], alpha=0.85, edgecolor='white', linewidth=1.5)
+        axes[ax_idx].set_title("QED\n(Quantitative Estimate of Drug-likeness)", fontweight="bold", fontsize=14, pad=10)
+        axes[ax_idx].set_ylim(0, 1.0)
+        axes[ax_idx].set_xticks(range(len(labels)))
+        axes[ax_idx].set_xticklabels(formatted_labels, rotation=45, ha='right', fontsize=9)
+        axes[ax_idx].set_ylabel("QED Score", fontsize=11)
+        axes[ax_idx].grid(axis='y', alpha=0.3, linestyle='--')
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, metrics["QED"])):
+            height = bar.get_height()
+            axes[ax_idx].text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                        f'{val:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
 
     # Improve overall appearance
     for ax in axes:
