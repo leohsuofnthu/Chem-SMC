@@ -117,7 +117,9 @@ python -m src.plots
 - **6 experiments**: 3 gradual + 3 range-based constraint levels
 
 Outputs land in `results/` (CSV tables) and `figures/` (PNGs) with a unified schema:
-`SMILES, Valid, QED, MW, logP, RotB, TPSA, HBD, HBA, Adherence, Weight, Model, Prompt, Temperature, TopP`.
+`SMILES, Valid, QED, MW, logP, RotB, TPSA, HBD, HBA, Adherence, Weight, Model, Prompt, ConstraintLevel, Temperature, TopP, Prefix`.
+
+Summary tables (`summary_table.csv`, `panel_table.csv`) contain aggregated metrics: `Model, ConstraintType, ConstraintLevel, Prompt, Adherence %, Valid %, Distinct %, Diversity, QED, Runtime_formatted`.
 
 ## Evaluation Metrics
 
