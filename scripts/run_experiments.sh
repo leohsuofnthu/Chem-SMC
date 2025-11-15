@@ -51,7 +51,9 @@ for level in "${RANGE_LEVELS[@]}"; do
         --n "$N" \
         --temperature 1.0 \
         --top_p 0.9 \
+        --max_new_tokens 128 \
         --batch_size 256 \
+        --seed 42 \
         --out-csv "results/baseline_${level}_results.csv" \
         --summary-csv "results/baseline_${level}_summary.csv"
 done
@@ -86,8 +88,9 @@ for level in "${GRADUAL_LEVELS[@]}"; do
         --ess-threshold 0.3 \
         --temperature 1.0 \
         --top_p 0.9 \
-        --max-new-tokens 60 \
+        --max-new-tokens 128 \
         --top-k 30 \
+        --seed 42 \
         --out-csv "results/smc_gradual_${level}_results.csv" \
         --summary-csv "results/smc_gradual_${level}_summary.csv"
 done
@@ -122,8 +125,9 @@ for level in "${RANGE_LEVELS[@]}"; do
         --ess-threshold 0.3 \
         --temperature 1.0 \
         --top_p 0.9 \
-        --max-new-tokens 60 \
+        --max-new-tokens 128 \
         --top-k 30 \
+        --seed 42 \
         --out-csv "results/smc_range_${level}_results.csv" \
         --summary-csv "results/smc_range_${level}_summary.csv"
 done
@@ -170,6 +174,7 @@ for level in "${GRADUAL_LEVELS[@]}"; do
         --n "$N" \
         --temperature 1.0 \
         --top_p 0.9 \
+        --max_new_tokens 128 \
         --batch_size 50 \
         --seed 42 \
         --quantize \
@@ -206,6 +211,7 @@ for level in "${RANGE_LEVELS[@]}"; do
         --n "$N" \
         --temperature 1.0 \
         --top_p 0.9 \
+        --max_new_tokens 128 \
         --batch_size 50 \
         --seed 42 \
         --quantize \
