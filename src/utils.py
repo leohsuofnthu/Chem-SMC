@@ -265,7 +265,7 @@ PROPERTY_COLUMNS = ["MW", "logP", "RotB", "HBD", "HBA", "TPSA", "QED"]
 SMILES_PATTERN = re.compile(r"[A-Za-z0-9@+\-\[\]\(\)=#\\/]+")
 
 # Constraint level mapping for backward compatibility
-CONSTRAINT_LEVEL_MAP = {"loose": "loosen", "tight": "tight", "ultra_tight": "ultra_tight"}
+CONSTRAINT_LEVEL_MAP = {"loose": "loose", "tight": "tight", "ultra_tight": "ultra_tight"}
 
 
 def canonicalize_smiles(smiles: str) -> Optional[str]:
@@ -463,14 +463,10 @@ def load_results_by_pattern(pattern: str, temperature: Optional[float] = None) -
             df["ConstraintType"] = "range-based"
         else:
             # Default: try to infer from ConstraintLevel
+            # Note: Both gradual and range-based use "loose" now, so we rely on filename or other indicators
             if "ConstraintLevel" in df.columns:
-                if "loosen" in df["ConstraintLevel"].values:
-                    df["ConstraintType"] = "gradual"
-                elif "loose" in df["ConstraintLevel"].values and "loosen" not in df["ConstraintLevel"].values:
-                    df["ConstraintType"] = "range-based"
-                else:
-                    # Ambiguous - leave as None, will be handled later
-                    df["ConstraintType"] = None
+                # If we can't infer from filename, leave as None - will be handled later
+                df["ConstraintType"] = None
             else:
                 df["ConstraintType"] = None
         dfs.append(df)
@@ -558,10 +554,9 @@ def load_experiment_results(
             smc_combined_df = load_results_file(str(smc_all), temperature)
             # Try to infer ConstraintType from ConstraintLevel
             if "ConstraintType" not in smc_combined_df.columns:
-                if "ConstraintLevel" in smc_combined_df.columns:
-                    smc_combined_df["ConstraintType"] = smc_combined_df["ConstraintLevel"].apply(
-                        lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
-                    )
+                # ConstraintType should be set from filename in load_results_by_pattern
+                # If missing, leave as None - will be handled later
+                pass
             # Split into gradual and range-based
             if "ConstraintType" in smc_combined_df.columns:
                 smc_gradual_df = smc_combined_df[smc_combined_df["ConstraintType"] == "gradual"].copy()
@@ -626,10 +621,9 @@ def load_experiment_results(
             smiley_combined_df = load_results_file(str(smiley_all), temperature)
             # Try to infer ConstraintType from ConstraintLevel
             if "ConstraintType" not in smiley_combined_df.columns:
-                if "ConstraintLevel" in smiley_combined_df.columns:
-                    smiley_combined_df["ConstraintType"] = smiley_combined_df["ConstraintLevel"].apply(
-                        lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
-                    )
+                # ConstraintType should be set from filename in load_results_by_pattern
+                # If missing, leave as None - will be handled later
+                pass
             # Split into gradual and range-based
             if "ConstraintType" in smiley_combined_df.columns:
                 smiley_gradual_df = smiley_combined_df[smiley_combined_df["ConstraintType"] == "gradual"].copy()
@@ -667,10 +661,9 @@ def load_experiment_results(
             else:
                 # Try to infer from filename or ConstraintLevel
                 if "ConstraintType" not in smiley_combined_df.columns:
-                    if "ConstraintLevel" in smiley_combined_df.columns:
-                        smiley_combined_df["ConstraintType"] = smiley_combined_df["ConstraintLevel"].apply(
-                            lambda x: "gradual" if x == "loosen" else ("range-based" if x == "loose" else None)
-                        )
+                    # ConstraintType should be set from filename in load_results_by_pattern
+                    # If missing, leave as None - will be handled later
+                    pass
     
     return baseline_df, smc_gradual_df, smc_range_df, smiley_gradual_df, smiley_range_df, smc_combined_df, smiley_combined_df
 
@@ -853,7 +846,7 @@ def compute_percentile_constraints(
 
 
 def create_gradual_smiley_constraints(
-    constraint_level: str = "loosen",
+    constraint_level: str = "loose",
 ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
     """
     Create gradual constraints compatible with SmileyLlama's training format.
@@ -863,35 +856,35 @@ def create_gradual_smiley_constraints(
     - logP: <= 3, <= 4, <= 5, <= 10, <= 15, > 15
     - RotB: <= 7, <= 10, > 10
     
-    Gradual constraint levels (aligned with drug-like properties and range-based constraints):
-    - loosen: <= 500 MW + <= 5 logP (covers most drug-like molecules, aligns with loose range [233-577] MW)
-    - tight: <= 400 MW + <= 4 logP + <= 10 RotB (typical drug-like, aligns with tight range [304-419] MW)
-    - ultra_tight: <= 350 MW + <= 3.5 logP + <= 8 RotB (stricter drug-like, aligns with ultra_tight range [336-372] MW)
+    Gradual constraint levels (progressive tightening - adding one condition at a time):
+    - loose: <= 500 MW (single constraint, covers most drug-like molecules)
+    - tight: <= 400 MW + <= 4 logP (adds logP constraint, typical drug-like)
+    - ultra_tight: <= 350 MW + <= 3.5 logP + <= 8 RotB (adds RotB constraint, stricter drug-like)
     
     Note: These constraints use upper bounds only (no lower bounds) to match SmileyLlama's training format.
     The reward function will still guide toward reasonable values within these bounds.
     """
-    if constraint_level == "loosen":
-        return {"MW": (None, 500.0), "logP": (None, 5.0)}
+    if constraint_level == "loose":
+        return {"MW": (None, 500.0)}
     elif constraint_level == "tight":
-        return {"MW": (None, 400.0), "logP": (None, 4.0), "RotB": (None, 10.0)}
+        return {"MW": (None, 400.0), "logP": (None, 4.0)}
     elif constraint_level == "ultra_tight":
         return {"MW": (None, 350.0), "logP": (None, 3.5), "RotB": (None, 8.0)}
     else:
-        raise ValueError(f"Unknown constraint level: {constraint_level}. Use 'loosen', 'tight', or 'ultra_tight'")
+        raise ValueError(f"Unknown constraint level: {constraint_level}. Use 'loose', 'tight', or 'ultra_tight'")
 
 
 def create_gradual_smiley_prompt_text(
-    constraint_level: str = "loosen",
+    constraint_level: str = "loose",
 ) -> str:
     """
     Create SmileyLlama prompt text for gradual constraints.
     Uses upper-bound format (<= X) that SmileyLlama understands.
     """
-    if constraint_level == "loosen":
-        return "Output a SMILES string for a molecule with the following properties: <= 500 molecular weight, <= 5 logP:"
+    if constraint_level == "loose":
+        return "Output a SMILES string for a molecule with the following properties: <= 500 molecular weight:"
     elif constraint_level == "tight":
-        return "Output a SMILES string for a molecule with the following properties: <= 400 molecular weight, <= 4 logP, <= 10 rotatable bonds:"
+        return "Output a SMILES string for a molecule with the following properties: <= 400 molecular weight, <= 4 logP:"
     elif constraint_level == "ultra_tight":
         return "Output a SMILES string for a molecule with the following properties: <= 350 molecular weight, <= 3.5 logP, <= 8 rotatable bonds:"
     else:
@@ -1126,10 +1119,10 @@ def create_constraint_variant(
 
 
 def create_gradual_constraint_prompt(
-    constraint_level: str = "loosen",
+    constraint_level: str = "loose",
 ) -> PromptSpec:
     """
-    Create a PromptSpec for gradual constraints (loosen/tight/ultra_tight).
+    Create a PromptSpec for gradual constraints (loose/tight/ultra_tight).
     Uses SmileyLlama-compatible format with upper bounds only.
     """
     constraints = create_gradual_smiley_constraints(constraint_level)

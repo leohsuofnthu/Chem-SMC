@@ -65,8 +65,8 @@ python -m src.baseline_generate_constraint --constraint-level loose
 python -m src.baseline_generate_constraint --constraint-level tight
 python -m src.baseline_generate_constraint --constraint-level ultra_tight
 
-# GPT2-Zinc+SMC (gradual constraints: loosen/tight/ultra_tight)
-python -m src.smc_generate_constraint --constraint-level loosen --use-gradual-constraints
+# GPT2-Zinc+SMC (gradual constraints: loose/tight/ultra_tight)
+python -m src.smc_generate_constraint --constraint-level loose --use-gradual-constraints
 python -m src.smc_generate_constraint --constraint-level tight --use-gradual-constraints
 python -m src.smc_generate_constraint --constraint-level ultra_tight --use-gradual-constraints
 
@@ -75,8 +75,8 @@ python -m src.smc_generate_constraint --constraint-level loose --no-gradual-cons
 python -m src.smc_generate_constraint --constraint-level tight --no-gradual-constraints
 python -m src.smc_generate_constraint --constraint-level ultra_tight --no-gradual-constraints
 
-# SmileyLlama (gradual constraints: loosen/tight/ultra_tight)
-python -m src.smiley_generate_constraint --constraint-level loosen --use-gradual-constraints
+# SmileyLlama (gradual constraints: loose/tight/ultra_tight)
+python -m src.smiley_generate_constraint --constraint-level loose --use-gradual-constraints
 python -m src.smiley_generate_constraint --constraint-level tight --use-gradual-constraints
 python -m src.smiley_generate_constraint --constraint-level ultra_tight --use-gradual-constraints
 
@@ -104,14 +104,14 @@ python -m src.plots
 - **3 experiments**: One per constraint level
 
 **GPT2-Zinc+SMC:**
-- **Gradual constraints**: Uses fixed upper bounds (loosen/tight/ultra_tight)
+- **Gradual constraints**: Uses fixed upper bounds (loose/tight/ultra_tight)
 - **Range-based constraints**: Uses percentile-based ranges (loose/tight/ultra_tight)
 - **SMC-guided generation**: Sequential Monte Carlo sampling with constraint-based rewards
 - **Enhanced reward function**: Distance-based rewards and smoother penalties for better optimization
 - **6 experiments**: 3 gradual + 3 range-based constraint levels
 
 **SmileyLlama:**
-- **Gradual constraints**: Uses fixed upper bounds compatible with SmileyLlama (loosen/tight/ultra_tight)
+- **Gradual constraints**: Uses fixed upper bounds compatible with SmileyLlama (loose/tight/ultra_tight)
 - **Range-based constraints**: Uses percentile-based ranges with prompt conversion (loose/tight/ultra_tight)
 - **Instruction-tuned**: Uses proper prompt template format for SmileyLlama
 - **6 experiments**: 3 gradual + 3 range-based constraint levels
@@ -146,13 +146,13 @@ See `EXPERIMENT_SETTINGS.md` for complete settings reference.
 - SmileyLlama is heavy; 4-bit quantisation keeps GPU usage ≈4 GB. Pass `--no_quantize` to force full precision.  
 - **Constraint types**: 
   - **Range-based** (Baseline, SMC range, SmileyLlama range): Percentile-based from training data
-    - loose: 5th-95th percentile (MW ~233-577)
-    - tight: 25th-75th percentile (MW ~304-419)
-    - ultra_tight: 40th-60th percentile (MW ~336-372)
-  - **Gradual** (SMC gradual, SmileyLlama gradual): Upper-bound only, SmileyLlama-compatible
-    - loosen: MW ≤ 500, logP ≤ 5
-    - tight: MW ≤ 400, logP ≤ 4, RotB ≤ 10
-    - ultra_tight: MW ≤ 350, logP ≤ 3.5, RotB ≤ 8
+    - loose: 5th-95th percentile (MW 233-577, logP -0.07-5.73, RotB 2-10)
+    - tight: 25th-75th percentile (MW 304-419, logP 1.88-4.00, RotB 3-6)
+    - ultra_tight: 40th-60th percentile (MW 336-372, logP 2.58-3.36, RotB 4-5)
+  - **Gradual** (SMC gradual, SmileyLlama gradual): Upper-bound only, SmileyLlama-compatible (progressive: 1→2→3 conditions)
+    - loose: MW ≤ 500 (1 condition)
+    - tight: MW ≤ 400, logP ≤ 4 (2 conditions)
+    - ultra_tight: MW ≤ 350, logP ≤ 3.5, RotB ≤ 8 (3 conditions)
 - SMC requires `genlm-control` library: `pip install genlm-control>=0.2.11`  
 - Adjust prompts or property ranges via `src/utils.py`
 

@@ -123,8 +123,8 @@ def plot_heatmap_comparison(panel_table: pd.DataFrame, out_dir: Path, filename: 
     fig.suptitle('Metrics Heatmap: Performance Across Models and Constraint Levels', 
                  fontsize=16, fontweight='bold', y=0.995)
     
-    level_order = ['loosen', 'loose', 'tight', 'ultra_tight']
-    level_labels = {'loosen': 'Loosen', 'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
+    level_order = ['loose', 'tight', 'ultra_tight']
+    level_labels = {'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
     
     for idx, metric in enumerate(available_metrics[:4]):  # Max 4 metrics
         ax = axes[idx // 2, idx % 2]
@@ -191,8 +191,8 @@ def plot_constraint_level_comparison(panel_table: pd.DataFrame, out_dir: Path, f
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
     # Define constraint level order
-    level_order = ['loosen', 'loose', 'tight', 'ultra_tight']
-    level_labels = {'loosen': 'Loosen', 'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
+    level_order = ['loose', 'tight', 'ultra_tight']
+    level_labels = {'loose': 'Loose', 'tight': 'Tight', 'ultra_tight': 'Ultra Tight'}
     
     # Color scheme: different colors for each model+type combination
     model_colors = {
@@ -234,8 +234,8 @@ def plot_constraint_level_comparison(panel_table: pd.DataFrame, out_dir: Path, f
             x_pos += 1
         
         width = 0.18
-        level_x_offsets = {'loosen': -1.5*width, 'loose': -0.5*width, 'tight': 0.5*width, 'ultra_tight': 1.5*width}
-        level_colors = {'loosen': '#90EE90', 'loose': '#87CEEB', 'tight': '#FFA500', 'ultra_tight': '#FF6347'}
+        level_x_offsets = {'loose': -0.5*width, 'tight': 0.5*width, 'ultra_tight': 1.5*width}
+        level_colors = {'loose': '#87CEEB', 'tight': '#FFA500', 'ultra_tight': '#FF6347'}
         
         # Track which levels we've plotted for legend
         legend_added = set()
@@ -465,30 +465,18 @@ Examples:
             if not smc_range_df.empty:
                 model_frames["GPT2-Zinc-87M+SMC (range-based)"] = filter_valid_molecules(smc_range_df)
         elif "ConstraintLevel" in smc.columns:
-            # Check ConstraintLevel to determine type (for combined files or individual files)
-            constraint_levels = smc["ConstraintLevel"].unique()
-            has_loosen = "loosen" in constraint_levels
-            has_loose = "loose" in constraint_levels
-            
-            if has_loosen and has_loose:
-                # Both types in combined file - split by unique identifiers
-                # Gradual: "loosen", "tight", "ultra_tight"; Range-based: "loose", "tight", "ultra_tight"
-                # Note: "tight" and "ultra_tight" appear in both, so we assign them to gradual if "loosen" exists
-                smc_gradual_split = smc[smc["ConstraintLevel"].isin(["loosen", "tight", "ultra_tight"])]
-                smc_range_split = smc[smc["ConstraintLevel"] == "loose"]
+            # Check ConstraintType to determine type (for combined files or individual files)
+            if "ConstraintType" in smc.columns:
+                smc_gradual_split = smc[smc["ConstraintType"] == "gradual"]
+                smc_range_split = smc[smc["ConstraintType"] == "range-based"]
                 if not smc_gradual_split.empty:
                     model_frames["GPT2-Zinc-87M+SMC (gradual)"] = filter_valid_molecules(smc_gradual_split)
                 if not smc_range_split.empty:
                     model_frames["GPT2-Zinc-87M+SMC (range-based)"] = filter_valid_molecules(smc_range_split)
-            elif has_loosen:
-                # Only gradual
-                model_frames["GPT2-Zinc-87M+SMC (gradual)"] = filter_valid_molecules(smc)
-            elif has_loose:
-                # Only range-based
-                model_frames["GPT2-Zinc-87M+SMC (range-based)"] = filter_valid_molecules(smc)
             else:
-                # Unknown - use generic
-                model_frames["GPT2-Zinc-87M+SMC"] = filter_valid_molecules(smc)
+                # Fallback: assume all is gradual if we can't determine
+                if not smc.empty:
+                    model_frames["GPT2-Zinc-87M+SMC (gradual)"] = filter_valid_molecules(smc)
         else:
             # No ConstraintLevel column - use generic label
             model_frames["GPT2-Zinc-87M+SMC"] = filter_valid_molecules(smc)
@@ -502,28 +490,18 @@ Examples:
             if not smiley_range_df.empty:
                 model_frames["SmileyLlama-8B (range-based)"] = filter_valid_molecules(smiley_range_df)
         elif "ConstraintLevel" in smiley.columns:
-            # Check ConstraintLevel to determine type
-            constraint_levels = smiley["ConstraintLevel"].unique()
-            has_loosen = "loosen" in constraint_levels
-            has_loose = "loose" in constraint_levels
-            
-            if has_loosen and has_loose:
-                # Both types in combined file - split by unique identifiers
-                smiley_gradual_split = smiley[smiley["ConstraintLevel"].isin(["loosen", "tight", "ultra_tight"])]
-                smiley_range_split = smiley[smiley["ConstraintLevel"] == "loose"]
+            # Check ConstraintType to determine type
+            if "ConstraintType" in smiley.columns:
+                smiley_gradual_split = smiley[smiley["ConstraintType"] == "gradual"]
+                smiley_range_split = smiley[smiley["ConstraintType"] == "range-based"]
                 if not smiley_gradual_split.empty:
                     model_frames["SmileyLlama-8B (gradual)"] = filter_valid_molecules(smiley_gradual_split)
                 if not smiley_range_split.empty:
                     model_frames["SmileyLlama-8B (range-based)"] = filter_valid_molecules(smiley_range_split)
-            elif has_loosen:
-                # Only gradual
-                model_frames["SmileyLlama-8B (gradual)"] = filter_valid_molecules(smiley)
-            elif has_loose:
-                # Only range-based
-                model_frames["SmileyLlama-8B (range-based)"] = filter_valid_molecules(smiley)
             else:
-                # Unknown - use generic
-                model_frames["SmileyLlama-8B"] = filter_valid_molecules(smiley)
+                # Fallback: assume all is gradual if we can't determine
+                if not smiley.empty:
+                    model_frames["SmileyLlama-8B (gradual)"] = filter_valid_molecules(smiley)
         else:
             # No ConstraintLevel column - use generic label
             model_frames["SmileyLlama-8B"] = filter_valid_molecules(smiley)

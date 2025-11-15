@@ -134,7 +134,7 @@ def load_runtime_data(results_dir: str = "results") -> pd.DataFrame:
                 # Extract constraint level from filename
                 # Check longer/more specific strings first to avoid substring matches
                 constraint_level = None
-                for level in ["ultra_tight", "loosen", "loose", "tight"]:
+                for level in ["ultra_tight", "loose", "tight"]:
                     if level in filename:
                         constraint_level = level
                         break
@@ -197,18 +197,11 @@ def build_tables(
     if "ConstraintLevel" in df.columns:
         mask_missing = df["ConstraintType"].isna() | (df["ConstraintType"] == "")
         if mask_missing.any():
-            # Infer from ConstraintLevel: "loosen" = gradual, "loose" = range-based
-            df.loc[mask_missing & (df["ConstraintLevel"] == "loosen"), "ConstraintType"] = "gradual"
-            df.loc[mask_missing & (df["ConstraintLevel"] == "loose"), "ConstraintType"] = "range-based"
-            
-            # For "tight" and "ultra_tight", try to infer from Model or Prompt
             # Baseline always uses range-based
             df.loc[mask_missing & (df["Model"] == "GPT2-Zinc-87M"), "ConstraintType"] = "range-based"
             
-            # For SMC and SmileyLlama with tight/ultra_tight, check if we have both types
+            # For SMC and SmileyLlama, try to infer from existing data or filename patterns
             # If we can't determine, leave as None (will be grouped separately)
-            # But try to infer from existing data: if we have "loosen" entries, likely gradual
-            # If we have "loose" entries, likely range-based
             for model in ["GPT2-Zinc-87M+SMC", "SmileyLlama-8B"]:
                 model_mask = mask_missing & (df["Model"] == model)
                 if model_mask.any():
@@ -227,7 +220,7 @@ def build_tables(
     group_cols = ["Model"]
     if "ConstraintLevel" in df.columns and df["ConstraintLevel"].nunique() > 1:
         # Don't add ConstraintLevel to group_cols for summary - we want to see model performance across all levels
-        # But we can use it to distinguish between gradual (loosen/tight/ultra_tight) and range-based (loose/tight/ultra_tight)
+        # Both gradual and range-based use the same constraint level names (loose/tight/ultra_tight)
         pass
     if "Temperature" in df.columns and df["Temperature"].nunique() > 1:
         group_cols.append("Temperature")

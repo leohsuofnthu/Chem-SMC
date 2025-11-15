@@ -17,7 +17,7 @@ Complete reference of all expected settings for each experiment type.
 | **seed** | 42 | 42 | 42 | 42 | 42 |
 | **quantize** | N/A | N/A | N/A | True | True |
 | **constraint_type** | Range | Gradual | Range | Gradual | Range |
-| **constraint_levels** | loose/tight/ultra_tight | loosen/tight/ultra_tight | loose/tight/ultra_tight | loosen/tight/ultra_tight | loose/tight/ultra_tight |
+| **constraint_levels** | loose/tight/ultra_tight | loose/tight/ultra_tight | loose/tight/ultra_tight | loose/tight/ultra_tight | loose/tight/ultra_tight |
 
 ---
 
@@ -43,7 +43,7 @@ Complete reference of all expected settings for each experiment type.
 ### 2. GPT2-Zinc+SMC (Gradual Constraints)
 
 **Settings:**
-- `constraint_level`: `"loosen"`, `"tight"`, or `"ultra_tight"`
+- `constraint_level`: `"loose"`, `"tight"`, or `"ultra_tight"`
 - `use_gradual_constraints`: `True`
 - `n`: `1000`, `particles`: `20`, `ess_threshold`: `0.3`, `temperature`: `1.0`, `top_p`: `0.9`, `max_new_tokens`: `60`, `top_k`: `30`, `seed`: `42`
 
@@ -52,9 +52,9 @@ Complete reference of all expected settings for each experiment type.
 - `results/smc_gradual_{level}_summary.csv`
 
 **Constraint Definition:**
-- `loosen`: `MW <= 500`, `logP <= 5`
-- `tight`: `MW <= 400`, `logP <= 4`, `RotB <= 10`
-- `ultra_tight`: `MW <= 350`, `logP <= 3.5`, `RotB <= 8`
+- `loosen`: `MW <= 500` (1 condition)
+- `tight`: `MW <= 400`, `logP <= 4` (2 conditions)
+- `ultra_tight`: `MW <= 350`, `logP <= 3.5`, `RotB <= 8` (3 conditions)
 
 ---
 
@@ -77,7 +77,7 @@ Complete reference of all expected settings for each experiment type.
 ### 4. SmileyLlama (Gradual Constraints)
 
 **Settings:**
-- `constraint_level`: `"loosen"`, `"tight"`, or `"ultra_tight"`
+- `constraint_level`: `"loose"`, `"tight"`, or `"ultra_tight"`
 - `use_gradual_constraints`: `True`
 - `n`: `1000`, `temperature`: `1.0`, `top_p`: `0.9`, `max_new_tokens`: `128`, `batch_size`: `50`, `seed`: `42`, `quantize`: `True`
 
@@ -123,7 +123,7 @@ All experiments produce CSV files with consistent columns:
 - `Weight`: Sample weight (1.0 for baseline/SmileyLlama, variable for SMC)
 - `Model`: Model name
 - `Prompt`: Prompt identifier
-- `ConstraintLevel`: Constraint level used (loosen/loose/tight/ultra_tight)
+- `ConstraintLevel`: Constraint level used (loose/tight/ultra_tight)
 - `Temperature`, `TopP`: Generation parameters
 - `Prefix`: Prefix used for generation (for multi-prefix experiments)
 

@@ -565,7 +565,7 @@ def generate_with_multi_prefix_smc(
 
 
 def run_constraint_experiment(
-    constraint_level: str = "loosen",
+    constraint_level: str = "loose",
     use_gradual_constraints: bool = True,
     property_ranges_path: str = "data/train_property_ranges.json",
     dataset: str = "Combined",
@@ -582,7 +582,7 @@ def run_constraint_experiment(
 ) -> pd.DataFrame:
     """
     Run a single constraint-level experiment using SMC-guided generation.
-    Uses gradual constraints (loosen/tight/ultra_tight) by default.
+    Uses gradual constraints (loose/tight/ultra_tight) by default.
     """
     start_time = time.time()
     
@@ -667,8 +667,8 @@ def run_constraint_experiment(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="SMC-guided GPT2-Zinc generation.")
-    parser.add_argument("--constraint-level", type=str, default="loosen", choices=["loosen", "tight", "ultra_tight", "loose"])
-    parser.add_argument("--use-gradual-constraints", action="store_true", default=True, help="Use gradual constraints (loosen/tight/ultra_tight)")
+    parser.add_argument("--constraint-level", type=str, default="loose", choices=["loose", "tight", "ultra_tight"])
+    parser.add_argument("--use-gradual-constraints", action="store_true", default=True, help="Use gradual constraints (loose/tight/ultra_tight)")
     parser.add_argument("--no-gradual-constraints", action="store_false", dest="use_gradual_constraints", help="Use legacy percentile-based constraints")
     parser.add_argument("--property-ranges", type=str, default="data/train_property_ranges.json")
     parser.add_argument("--dataset", type=str, default="Combined", choices=["ZINC", "ChEMBL", "Combined"])

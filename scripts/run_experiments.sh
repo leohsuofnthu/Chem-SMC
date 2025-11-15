@@ -3,16 +3,16 @@
 set -euo pipefail
 
 # Simplified experiment pipeline: Run 3 constraint levels per model
-# - Gradual constraints (loosen/tight/ultra_tight): upper-bound only
-#   - loosen: <= 500 MW + <= 5 logP (covers most drug-like molecules)
-#   - tight: <= 400 MW + <= 4 logP + <= 10 RotB (typical drug-like)
-#   - ultra_tight: <= 350 MW + <= 3.5 logP + <= 8 RotB (stricter drug-like)
+# - Gradual constraints (loose/tight/ultra_tight): upper-bound only, progressive (1→2→3 conditions)
+#   - loose: <= 500 MW (1 condition, covers most drug-like molecules)
+#   - tight: <= 400 MW + <= 4 logP (2 conditions, typical drug-like)
+#   - ultra_tight: <= 350 MW + <= 3.5 logP + <= 8 RotB (3 conditions, stricter drug-like)
 # - Range-based constraints (loose/tight/ultra_tight): percentile-based ranges
 #   - loose: 5th-95th percentile (MW ~233-577, logP ~-0.07-5.73, RotB ~2-10)
 #   - tight: 25th-75th percentile (MW ~304-419, logP ~1.88-4.00, RotB ~3-6)
 #   - ultra_tight: 40th-60th percentile (MW ~336-372, logP ~2.58-3.36, RotB ~4-5)
 
-GRADUAL_LEVELS=(loosen tight ultra_tight)
+GRADUAL_LEVELS=(loose tight ultra_tight)
 RANGE_LEVELS=(loose tight ultra_tight)
 PROPERTY_RANGES="data/train_property_ranges.json"
 DATASET="Combined"
@@ -70,7 +70,7 @@ if files:
 "
 
 # 2. GPT2-Zinc+SMC with gradual constraints (upper-bound only)
-# SMC uses gradual constraints (loosen/tight/ultra_tight) with dynamic reward scaling
+# SMC uses gradual constraints (loose/tight/ultra_tight) with dynamic reward scaling
 echo ""
 echo "[2/5] Running GPT2-Zinc+SMC with gradual constraints (upper-bound only)..."
 echo "  Type: Gradual constraints (upper-bound)"
@@ -155,7 +155,7 @@ if files:
 "
 
 # 4. SmileyLlama with gradual constraints (upper-bound only)
-# SmileyLlama uses gradual constraints (loosen/tight/ultra_tight) - SmileyLlama-compatible format
+# SmileyLlama uses gradual constraints (loose/tight/ultra_tight) - SmileyLlama-compatible format
 echo ""
 echo "[4/5] Running SmileyLlama with gradual constraints (upper-bound only)..."
 echo "  Type: Gradual constraints (upper-bound)"
