@@ -1,5 +1,13 @@
 # Abstract 
-This project investigates the use of Sequential Monte Carlo (SMC) sampling for controlled molecular generation using small chemistry-focused language models. We demonstrate that SMC, equipped with potential-based rewards and SMILES validity constraints, substantially improves controllability and sampling efficiency. Our findings show that small models such as GPT2-ZINC, when guided by SMC, can achieve control performance that rivals or surpasses that of large-scale models such as Smiley Llama-8B, despite operating at a fraction of the computational cost.
+This project studies Sequential Monte Carlo (SMC) as an inference-time
+control mechanism for molecular generation with small chemistry-focused
+language models. By incorporating continuous, property-aware potential
+functions and SMILES validity constraints into the sampling process, SMC
+significantly improves controllability without modifying or retraining the
+underlying model. Experiments on GPT2-ZINC show that SMC-guided
+generation achieves substantially higher constraint adherence than promptbased
+control in an 8B-parameter SmileyLlama model, while maintaining
+high validity and diversity at a fraction of the computational cost.
 
 # chem-smc
 
